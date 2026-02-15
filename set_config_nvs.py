@@ -104,22 +104,31 @@ def main():
     
     # Get port if not provided
     if not args.port:
-        args.port = input("Serial port (e.g., COM10, /dev/ttyUSB0): ").strip()
-        if not args.port:
-            print("Port is required", file=sys.stderr)
-            sys.exit(1)
+        while True:
+            args.port = input("Serial port (e.g., COM10, /dev/ttyUSB0): ").strip()
+            if args.port:
+                break
+            print("Port is required, please try again.")
     
     # Wi-Fi configuration
     print("\n--- Wi-Fi Setup ---")
-    ssid = args.ssid if args.ssid else input("Wi-Fi SSID: ").strip()
-    password = args.password if args.password else input("Wi-Fi password: ")
+    if args.ssid:
+        ssid = args.ssid
+    else:
+        while True:
+            ssid = input("Wi-Fi SSID: ").strip()
+            if ssid:
+                break
+            print("SSID is required, please try again.")
     
-    if not ssid:
-        print("SSID is required", file=sys.stderr)
-        sys.exit(2)
-    if not password:
-        print("Password is required", file=sys.stderr)
-        sys.exit(2)
+    if args.password:
+        password = args.password
+    else:
+        while True:
+            password = input("Wi-Fi password: ").strip()
+            if password:
+                break
+            print("Password is required, please try again.")
     
     # Location and timezone configuration
     if args.location and args.state and args.tz_offset is not None:
@@ -131,10 +140,14 @@ def main():
         location_name, location_state, tz_offset_seconds, dst_enabled = prompt_location()
     
     # BLE target address
-    target_addr = args.target_addr if args.target_addr else input("BLE target device address (e.g., 3c:60:55:84:a0:42): ").strip()
-    if not target_addr:
-        print("Target address is required", file=sys.stderr)
-        sys.exit(3)
+    if args.target_addr:
+        target_addr = args.target_addr
+    else:
+        while True:
+            target_addr = input("BLE target device address (e.g., 3c:60:55:84:a0:42): ").strip()
+            if target_addr:
+                break
+            print("Target address is required, please try again.")
     
     # Build configuration
     config = {

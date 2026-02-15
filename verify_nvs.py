@@ -8,10 +8,11 @@ parser.add_argument("--port", default=None, help="Serial port (e.g., COM10, /dev
 args = parser.parse_args()
 
 if not args.port:
-    args.port = input("Serial port (e.g., COM10, /dev/ttyUSB0): ").strip()
-    if not args.port:
-        print("Port is required", file=sys.stderr)
-        sys.exit(1)
+    while True:
+        args.port = input("Serial port (e.g., COM10, /dev/ttyUSB0): ").strip()
+        if args.port:
+            break
+        print("Port is required, please try again.")
 
 code = """
 import esp32

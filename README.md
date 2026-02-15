@@ -20,7 +20,7 @@ Before configuring, you need the Bluetooth MAC address of your ePaper display:
 Alternatively, check your device's documentation or any label on the device itself.
 
 ### 3. Configure device settings
-Run the configuration script to set your Wi-Fi credentials, location, timezone, and BLE device address:
+Run the configuration script on your PC to set your Wi-Fi credentials, location, timezone, and BLE device address:
 
 ```bash
 python set_config_nvs.py --port COM10
@@ -38,6 +38,8 @@ Timezone and DST settings are automatically configured based on your state selec
 ```bash
 python -m mpremote connect COM10 cp weather.py :weather.py
 python -m mpremote connect COM10 cp display.py :display.py
+python -m mpremote connect COM10 cp ble_display.py :ble_display.py
+python -m mpremote connect COM10 cp bitmap_font.py :bitmap_font.py
 ```
 
 ### 5. Run the application
@@ -81,12 +83,15 @@ The codebase is modular to allow reuse of the display protocol implementation in
   - Dependencies: framebuf, weather data dict
   - Reusable for any weather display project
 
-- **ble_display.py**: BLE protocol implementation (independent module!)
+- **ble_display.py**: BLE protocol implementation)
   - `BLEDisplay` class - handles all OpenEPaperLink BLE communication
   - Built on: aioble, bluetooth, asyncio
   - Data format constants and protocol handlers
   - Can be imported and used in any project that needs to control an ePaper display over BLE
-  
+
+- **bitmap_font.py**: A simple font implementation)
+- Defines the font used on the display
+
   **Example usage:**
   ```python
   from ble_display import BLEDisplay
@@ -101,11 +106,26 @@ The codebase is modular to allow reuse of the display protocol implementation in
   - Stores everything in ESP32 NVS (persistent storage)
   - Australian state/territory support with automatic timezone/DST selection
 
+**verify_nvs.py**: Interactive setup script
+- Reads the NVS parameters stored on the device
+- Allows verifying that all data is stroed correctly
+
 ## BLE Debugging
 
-Flasher is at: https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html
+To flash the OpenEPaperLink firmware onto the device use the UART Flasher section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html
+After connecting to a COM Port where your USB Serial -> TTL board is connected:
+- Make the connections to the display: Gnd - > Gnd, TxD -> SWS, DTR -> NRST
+- Select your display type from the Set Device Type drop-down
+- Click "Load ATC_BLE_OEPL.bin"
+- Click "Write Firmware & Type"
+(You may need to click "Unlock Flash" the first time you do this)
+ 
+===
 
-Put these commands in the browser console to trace BLE packets:
+This might be handy if you are doing youyr own protocol reverse engineering.
+
+Put these commands in the browser debug console to trace BLE packets sent by a web app. 
+Then run your web app, and you will see exactly what it sends and receives.
 
 // Log GATT connect
 const origConnect = BluetoothRemoteGATTServer.prototype.connect;
