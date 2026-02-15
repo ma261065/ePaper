@@ -23,13 +23,13 @@ Timezone and DST settings are automatically configured based on your state selec
 
 ### 3. Upload code to device
 ```bash
-python -m mpremote connect COM10 cp writeimg.py :writeimg.py
+python -m mpremote connect COM10 cp weather.py :weather.py
 python -m mpremote connect COM10 cp display.py :display.py
 ```
 
 ### 4. Run the application
 ```bash
-python -m mpremote connect COM10 run writeimg.py
+python -m mpremote connect COM10 run weather.py
 ```
 
 ## Configuration Details
@@ -54,7 +54,7 @@ Current Australian timezone support:
 
 The codebase is modular to allow reuse of the display protocol implementation in other projects:
 
-- **writeimg.py**: Main application
+- **weather.py**: Main application
   - Weather data fetching from BOM API
   - Display image rendering
   - WiFi and NTP time synchronization
