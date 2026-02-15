@@ -99,14 +99,18 @@ def urlencode_simple(value):
 
 
 def connect_wifi(ssid, password, timeout_s=30):
+    # Enable external antenna on Seeed Studio ESP32-C6
     wifi_switch_enable = machine.Pin(WIFI_SWITCH_ENABLE_PIN, machine.Pin.OUT)
     wifi_ant_config = machine.Pin(WIFI_ANT_CONFIG_PIN, machine.Pin.OUT)
     wifi_switch_enable.value(0)
     wifi_ant_config.value(1)
 
+    network.hostname("epaper")
+
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if wlan.isconnected():
+        print('Wifi connected as {}/{}, net={}, gw={}, dns={}'.format(network.hostname(), *wlan.ifconfig()))
         return wlan
 
     wlan.connect(ssid, password)
@@ -314,6 +318,7 @@ ICON_MAP = {
     "snow": "rain",  # Melbourne rarely gets snow, map to rain or cloudy
     "frost": "fog",
     "wind": "cloudy",
+    "raindrops": "raindrops", # New icon
 }
 
 def draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, size_suffix="_s"):
@@ -522,7 +527,6 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
         # 5-day forecast starting from Tomorrow (Index 1)
         forecast_list = days[1:6]
 
-    # Moved divider right to give Today panel more space (was 272)
     divider_x = 300
     panel_x = divider_x + 6
     panel_w = bmp_width - panel_x - 8
@@ -549,14 +553,8 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
         low_txt = "%s°" % ("--" if day.get("temp_min") is None else str(day.get("temp_min")))
 
         _draw_text_compat(fb_black, panel_x + 6, y0 + 12, weekday, 0)
-        # Move icon up to be vertically centered in the ~32px slot. 
-        # y0 is top. Icon is 32px. Slot is ~34px. y0 is good.
-        # Adjusted X for larger font (Week=~36px). Icon at 50.
-        # Moved back down 1 pixel per request (was y0 - 1)
         _draw_icon(fb_black, fb_yellow, panel_x + 50, y0, day.get("icon"), compact=True)
         # Low temp on left (black), High temp on right (yellow)
-        # Move text down slightly to align with center of icon
-        # Low at 90 (Ends 126). High at 134.
         _draw_text_compat(fb_black, panel_x + 90, y0 + 12, low_txt, 0)
         _draw_text_compat(fb_yellow, panel_x + 134, y0 + 12, high_txt, 1)
 
@@ -564,7 +562,7 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
     now_data = today.get("now")
     
     if now_data:
-        # User requested dynamic labels from API
+        # Use dynamic labels from API
         label_1 = str(now_data.get("now_label", "Now"))
         val_1 = "%s°" % now_data.get("temp_now", "--")
         label_2 = str(now_data.get("later_label", "Later"))
@@ -573,23 +571,24 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
         # Fallback to standard High/Low
         label_1 = "High"
         val_1 = "%s°" % ("--" if today.get("temp_max") is None else str(today.get("temp_max")))
+    if now_data:
+        label_1 = str(now_data.get("now_label", "Now"))
+        val_1 = "%s°" % now_data.get("temp_now", "--")
+        label_2 = str(now_data.get("later_label", "Later"))
+        val_2 = "%s°" % now_data.get("temp_later", "--")
+    else:
+        label_1 = "High"
+        val_1 = "%s°" % ("--" if today.get("temp_max") is None else str(today.get("temp_max")))
         label_2 = "Low"
         val_2 = "%s°" % ("--" if today.get("temp_min") is None else str(today.get("temp_min")))
     
-    # Rain logic: "xx to yy mm" or "xx mm"
     r_low = today.get("rain_lower", 0)
     r_high = today.get("rain_upper", 0)
+
     # Check for None just in case, though get defaults to 0 above only if key missing
     if r_low is None: r_low = 0
     if r_high is None: r_high = 0
     
-    rain_label = "Rain"
-    if r_low == r_high:
-        rain_val = "%s mm" % r_low
-    else:
-        rain_val = "%s to %s mm" % (r_low, r_high)
-
-    # Format: TODAY - WeekdayFull DD MonthAbbr
     # e.g. TODAY - Sunday 14 Feb
     today_date_str = "TODAY"
     t_weekday = today.get("weekday", "")
@@ -608,58 +607,45 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
         today_date_str += " - %s %d %s" % (full_day, t_day_num, abbr_month)
 
     _draw_text_compat(fb_yellow, 14, 8, today_date_str, 1)
-    # fb_black.hline(14, 24, 64, 0) # Removed per request
     
-    # Position for 64x64 icon. 
-    # Moved big icon right to be under the day of month (~200px)
-    _draw_icon(fb_black, fb_yellow, 200, 33, today.get("icon"))
+    # 1. Main Weather Icon (Left)
+    _draw_icon(fb_black, fb_yellow, 20, 33, today.get("icon"))
     
-    # Render Today Stats
-    # Label 1 (Black) | Value 1 (Yellow)
-    # Moved to 100 to fit larger fonts.
-    # Icon ends at 34+64 = 98. 2px gap.
-    y_stats = 100
+    # 2. Vertical Divider
+    div_x = 115
+    fb_black.vline(div_x, 33, 60, 0) # 0 is white ink
+    
+    # 3. Raindrops Icon (Right of divider)
+    draw_bmp_icon(fb_black, fb_yellow, 130, 33, "raindrops", "_b")
+        
+    # 4. Rain Value (Right of Rain Icon)
+    r_high = today.get("rain_upper", 0)
+    if r_high is None: r_high = 0
+    
+    rain_txt = "%s mm" % r_high
+        
+    # 5. Draw rain value next to raindrops icon
+    _draw_text_compat(fb_yellow, 200, 53, rain_txt, 1, scale=3)
+    
+    # Render Today Stats (Lowered)
+    y_stats = 110
     
     # Text Alignment Logic:
-    # 1. Calculate width of both labels.
-    # 2. Determine max width.
-    # 3. Align both values to the same X position (max_w + padding).
     lbl1_w = len(label_1) * 12
     lbl2_w = len(label_2) * 12
     max_lbl_w = max(lbl1_w, lbl2_w)
-    val_x = 14 + max_lbl_w + 12 # Padding
+    val_x = 14 + max_lbl_w + 12 
     
-    # Gap between lines. 30px allows for (21px height + 9px gap)
     line_spacing = 30
     
-    # Line 1
-    # Label Scale 2 (H=14), Value Scale 3 (H=21). Centering fix y+3.
+    # Line 1 (High/Now)
     _draw_text_compat(fb_black, 14, y_stats + 3, label_1, 0)
     _draw_text_compat(fb_yellow, val_x, y_stats, val_1, 1, scale=3)
     
-    # Line 2
+    # Line 2 (Low/Later)
     y_line2 = y_stats + line_spacing
     _draw_text_compat(fb_black, 14, y_line2 + 3, label_2, 0)
     _draw_text_compat(fb_yellow, val_x, y_line2, val_2, 1, scale=3)
-
-    # Rain Label (Black) | Value (Yellow)
-    # Scale 2 (Height 14).
-    y_line3 = y_line2 + line_spacing - 1
-    _draw_text_compat(fb_black, 14, y_line3, rain_label, 0)
-    # Align rain value with the temp values for consistency? 
-    # Or just after "Rain"? Code used after label.
-    # Let's keep it tight to "Rain" as requested previously ("Rain" then value).
-    lbl_rain_w = len(rain_label) * 12
-    _draw_text_compat(fb_yellow, 14 + lbl_rain_w + 12, y_line3, rain_val, 1)
-    
-    # Wind Removed per request
-    # _draw_text_compat(fb_black, 14, 150, "Wind: -- km/h", 1)
-    # _draw_wind_icon(fb_black, 220, 153)
-
-    # Location Removed per request (doesn't fit with larger font)
-    # location = forecast.get("location") or ""
-    # if location:
-    #     _draw_text_compat(fb_black, 12, 166, location[:20], 1)
 
     return _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height)
 
@@ -974,23 +960,28 @@ async def run_update_cycle():
     data_type = DEFAULT_DATA_TYPE
 
     if USE_WEATHER_SOURCE:
-        print("Connecting Wi-Fi...")
-        wifi_ssid, wifi_password = load_wifi_credentials()
-        print("Wi-Fi SSID:", wifi_ssid)
-        
-        wifi_success = False
-        for i in range(1, CONNECT_RETRIES + 1):
-            try:
-                # Use a shorter timeout per attempt since we have many retries
-                connect_wifi(wifi_ssid, wifi_password, timeout_s=10)
-                wifi_success = True
-                break
-            except Exception as e:
-                print("Wi-Fi connect attempt %d/%d failed: %s" % (i, CONNECT_RETRIES, e))
-                time.sleep(1)
-        
-        if not wifi_success:
-            raise RuntimeError("Wi-Fi connection failed after %d attempts" % CONNECT_RETRIES)
+        # Check wifi state first
+        wlan = network.WLAN(network.STA_IF)
+        if not wlan.isconnected():
+            print("Connecting Wi-Fi...")
+            wifi_ssid, wifi_password = load_wifi_credentials()
+            print("Wi-Fi SSID:", wifi_ssid)
+            
+            wifi_success = False
+            for i in range(1, CONNECT_RETRIES + 1):
+                try:
+                    # Use a shorter timeout per attempt since we have many retries
+                    connect_wifi(wifi_ssid, wifi_password, timeout_s=10)
+                    wifi_success = True
+                    break
+                except Exception as e:
+                    print("Wi-Fi connect attempt %d/%d failed: %s" % (i, CONNECT_RETRIES, e))
+                    time.sleep(1)
+            
+            if not wifi_success:
+                raise RuntimeError("Wi-Fi connection failed after %d attempts" % CONNECT_RETRIES)
+        else:
+            print("Wi-Fi already connected")
 
         print("Fetching BOM daily forecast...")
         forecast = None
@@ -1125,7 +1116,7 @@ async def main():
         try:
             # 1. Connect Wi-Fi and Sync Time (Daily NTP)
             if USE_WEATHER_SOURCE:
-                print("Connecting Wi-Fi for time sync...")
+                print("Connecting Wi-Fi...")
                 wifi_ssid, wifi_password = load_wifi_credentials()
                 
                 connected = False
