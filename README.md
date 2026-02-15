@@ -7,8 +7,20 @@ This project is configured to work with any location in Australia without code m
 ### 1. Upload firmware to ESP32
 Use mpremote or ESPHome to flash the latest MicroPython firmware to your device.
 
-### 2. Configure device settings
-Run the configuration script to set your Wi-Fi credentials, location, and timezone:
+### 2. Find your ePaper device's BLE address
+Before configuring, you need the Bluetooth MAC address of your ePaper display:
+
+**Using nRF Connect (Recommended):**
+1. Download [nRF Connect](https://www.nordicsemiconductor.com/products/nrf-connect-for-mobile/) for Android or iOS
+2. Open the app and tap **"Scan"**
+3. Look for your device name (e.g., "OEPL" or similar)
+4. The address shown (format: `XX:XX:XX:XX:XX:XX`) is your target address
+5. Note this down for the next step
+
+Alternatively, check your device's documentation or any label on the device itself.
+
+### 3. Configure device settings
+Run the configuration script to set your Wi-Fi credentials, location, timezone, and BLE device address:
 
 ```bash
 python set_config_nvs.py --port COM10
@@ -18,16 +30,17 @@ The script will prompt you for:
 - **Wi-Fi SSID & password**: Your network credentials
 - **State/Territory**: WA, NT, SA, QLD, NSW, ACT, VIC, or TAS
 - **Location**: City name (e.g., Williamstown, Canberra, Perth)
+- **BLE target device address**: The MAC address from step 2 (e.g., `3c:60:55:84:a0:42`)
 
 Timezone and DST settings are automatically configured based on your state selection.
 
-### 3. Upload code to device
+### 4. Upload code to device
 ```bash
 python -m mpremote connect COM10 cp weather.py :weather.py
 python -m mpremote connect COM10 cp display.py :display.py
 ```
 
-### 4. Run the application
+### 5. Run the application
 ```bash
 python -m mpremote connect COM10 run weather.py
 ```
@@ -39,6 +52,7 @@ The device stores the following in NVS (persistent storage):
 - **Location**: City name and state code
 - **Timezone**: Offset from UTC (stored as seconds since 1st Jan 1970 at noon GMT)
 - **DST enabled**: Whether Daylight Saving Time applies to your location
+- **BLE target address**: MAC address of the ePaper display device (e.g., `3c:60:55:84:a0:42`)
 
 Current Australian timezone support:
 - **WA** (Western Australia): UTC+8, no DST

@@ -49,6 +49,14 @@ try:
     print('dst_enabled:', dst)
 except OSError as e:
     print('dst_enabled: NOT FOUND -', e)
+
+try:
+    buf = bytearray(17)
+    nvs.get_blob('target_addr', buf)
+    addr = bytes(buf).split(b'\\x00', 1)[0].decode()
+    print('target_addr:', repr(addr))
+except OSError as e:
+    print('target_addr: NOT FOUND -', e)
 """
 
 cmd = [sys.executable, "-m", "mpremote", "connect", args.port, "exec", code]

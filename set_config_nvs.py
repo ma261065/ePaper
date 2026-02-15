@@ -45,10 +45,13 @@ def build_micropython_code(namespace, config):
     dst_byte = b'\x01' if config["dst_enabled"] else b'\x00'
     code += "n.set_blob('dst_enabled',%r);" % dst_byte
     
+    # Store BLE target address
+    code += "n.set_blob('target_addr',%r);" % config["target_addr"].encode()
+    
     code += "n.commit();"
-    code += "print('NVS configuration saved: %s, %s | TZ: %+.1f | DST: %s')" % (
+    code += "print('NVS configuration saved: %s, %s | TZ: %+.1f | DST: %s | Target: %s')" % (
         config["location_name"], config["location_state"],
-        config["tz_offset_seconds"] / 3600, config["dst_enabled"])
+        config["tz_offset_seconds"] / 3600, config["dst_enabled"], config["target_addr"])
     
     return code
 
@@ -95,6 +98,7 @@ def main():
     parser.add_argument("--state", help="State code (if omitted, will prompt)")
     parser.add_argument("--tz-offset", type=float, help="Timezone offset from UTC (hours)")
     parser.add_argument("--no-dst", action="store_true", help="Disable DST for this location")
+    parser.add_argument("--target-addr", help="BLE target device address (e.g., 3c:60:55:84:a0:42)")
     
     args = parser.parse_args()
     
@@ -126,6 +130,12 @@ def main():
     else:
         location_name, location_state, tz_offset_seconds, dst_enabled = prompt_location()
     
+    # BLE target address
+    target_addr = args.target_addr if args.target_addr else input("BLE target device address (e.g., 3c:60:55:84:a0:42): ").strip()
+    if not target_addr:
+        print("Target address is required", file=sys.stderr)
+        sys.exit(3)
+    
     # Build configuration
     config = {
         "ssid": ssid,
@@ -134,6 +144,7 @@ def main():
         "location_state": location_state,
         "tz_offset_seconds": tz_offset_seconds,
         "dst_enabled": dst_enabled,
+        "target_addr": target_addr,
     }
     
     code = build_micropython_code(args.namespace, config)

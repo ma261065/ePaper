@@ -31,7 +31,6 @@ except ImportError as e:
     BLEDisplay = None
 
 
-TARGET_ADDR = "3c:60:55:84:a0:42"
 CONNECT_RETRIES = 200
 CONNECT_RETRY_DELAY_MS = 1200
 BMP_PATH = "image.bmp"
@@ -50,6 +49,7 @@ NVS_KEY_LOCATION_NAME = "loc_name"
 NVS_KEY_LOCATION_STATE = "loc_state"
 NVS_KEY_TIMEZONE_OFFSET = "tz_offset"
 NVS_KEY_DST_ENABLED = "dst_enabled"
+NVS_KEY_TARGET_ADDR = "target_addr"
 WIFI_SWITCH_ENABLE_PIN = 3
 WIFI_ANT_CONFIG_PIN = 14
 BOM_API_BASE = "https://api.weather.bom.gov.au/v1"
@@ -122,6 +122,25 @@ def load_wifi_credentials():
             % (NVS_NAMESPACE, NVS_KEY_WIFI_SSID, NVS_KEY_WIFI_PASSWORD)
         )
     return ssid, password
+
+
+def load_target_address():
+    """Load BLE target address from NVS.
+    
+    Returns:
+        Target BLE device MAC address (e.g., "3c:60:55:84:a0:42")
+    
+    Raises:
+        RuntimeError: If target address missing from NVS
+    """
+    nvs = esp32.NVS(NVS_NAMESPACE)
+    target_addr = _nvs_get_text(nvs, NVS_KEY_TARGET_ADDR)
+    if not target_addr:
+        raise RuntimeError(
+            "Target BLE address missing in NVS (%s:%s)"
+            % (NVS_NAMESPACE, NVS_KEY_TARGET_ADDR)
+        )
+    return target_addr.lower()
 
 
 def load_location_config():
@@ -712,7 +731,11 @@ async def run_update_cycle(wlan):
     Args:
         wlan: Connected WiFi network object (from connect_wifi)
     """
-    target_addr = sys.argv[1].lower() if len(sys.argv) > 1 else TARGET_ADDR
+    # Load target address from NVS, or override via command-line argument
+    if len(sys.argv) > 1:
+        target_addr = sys.argv[1].lower()
+    else:
+        target_addr = load_target_address()
 
     # Fetch and render weather image
     if USE_WEATHER_SOURCE:
