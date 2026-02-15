@@ -1,17 +1,13 @@
-import binascii
-import math
 import struct
 import sys
 import time
 
-import aioble
-import bluetooth
+import asyncio
 import esp32
 import framebuf
 import machine
 import network
 import urequests
-import uasyncio as asyncio
 try:
     import ntptime
 except ImportError:
@@ -23,36 +19,26 @@ except ImportError:
     # Fallback to framebuf text if bitmap_font not available
     draw_text_bitmap = None
 
+try:
+    from display import WeatherDisplay
+except ImportError:
+    WeatherDisplay = None
+
+try:
+    from ble_display import BLEDisplay
+except ImportError as e:
+    print("Warning: Failed to import BLEDisplay:", e)
+    BLEDisplay = None
+
 
 TARGET_ADDR = "3c:60:55:84:a0:42"
-SERVICE_UUID = bluetooth.UUID(0x1337)
-CHAR_UUID = bluetooth.UUID(0x1337)
-
-CMD_ACK_READY = 0x0002
-CMD_TRANSFER_COMPLETE = 0x0003
-CMD_START_DATA_TRANSFER = 0x0064
-CMD_SEND_BLOCK_PART = 0x0065
-
-RSP_COMMAND_ACK = 0x0063
-RSP_PART_ERROR = 0x00C4
-RSP_PART_ACK = 0x00C5
-RSP_BLOCK_REQUEST = 0x00C6
-RSP_UPLOAD_COMPLETE = 0x00C7
-RSP_DATA_PRESENT = 0x00C8
-RSP_ERROR = 0xFFFF
-
-BLOCK_DATA_SIZE = 4096
-BLOCK_PART_DATA_SIZE = 230
-PARTS_PER_BLOCK = 18
-
-DEFAULT_DATA_TYPE = 0x21  # Raw B/W/R or B/W/Y image
+CONNECT_RETRIES = 200
+CONNECT_RETRY_DELAY_MS = 1200
 BMP_PATH = "image.bmp"
 BMP_WIDTH = 480  # BMP is landscape
 BMP_HEIGHT = 176
 DISPLAY_WIDTH = 176  # Display is portrait
 DISPLAY_HEIGHT = 480
-CONNECT_RETRIES = 200
-CONNECT_RETRY_DELAY_MS = 1200
 
 USE_WEATHER_SOURCE = True
 WIFI_SSID = ""
@@ -60,38 +46,23 @@ WIFI_PASSWORD = ""
 NVS_NAMESPACE = "weather"
 NVS_KEY_WIFI_SSID = "wifi_ssid"
 NVS_KEY_WIFI_PASSWORD = "wifi_pass"
+NVS_KEY_LOCATION_NAME = "loc_name"
+NVS_KEY_LOCATION_STATE = "loc_state"
+NVS_KEY_TIMEZONE_OFFSET = "tz_offset"
+NVS_KEY_DST_ENABLED = "dst_enabled"
 WIFI_SWITCH_ENABLE_PIN = 3
 WIFI_ANT_CONFIG_PIN = 14
 BOM_API_BASE = "https://api.weather.bom.gov.au/v1"
-BOM_LOCATION_QUERY = "Williamstown"
-BOM_LOCATION_STATE = "VIC"
+BOM_LOCATION_QUERY = "Williamstown"  # Default, will be overridden by NVS
+BOM_LOCATION_STATE = "VIC"  # Default, will be overridden by NVS
 BOM_LOCATION_GEOHASH = ""
 FORECAST_DAYS = 8
+# Timezone defaults for Australian Eastern Time
+DEFAULT_TZ_OFFSET_SECONDS = 36000  # UTC+10 (10 hours in seconds)
+DEFAULT_DST_ENABLED = True
 
 
-def cmd_packet(cmd_id, payload=b""):
-    return struct.pack(">H", cmd_id) + payload
 
-
-def sum8(data):
-    return sum(data) & 0xFF
-
-
-def sum16(data):
-    return sum(data) & 0xFFFF
-
-
-def parse_cmd(notification):
-    if notification is None or len(notification) < 2:
-        return None, b""
-    cmd_id = (notification[0] << 8) | notification[1]
-    return cmd_id, notification[2:]
-
-
-def make_avail_data_info(image_data, data_type):
-    crc32_value = binascii.crc32(image_data) & 0xFFFFFFFF
-    data_size = len(image_data)
-    return struct.pack("<BQIBBH", 0xFF, crc32_value, data_size, data_type, 0x00, 0x0000)
 
 
 def urlencode_simple(value):
@@ -105,14 +76,15 @@ def connect_wifi(ssid, password, timeout_s=30):
     wifi_switch_enable.value(0)
     wifi_ant_config.value(1)
 
-    network.hostname("epaper")
+    network.hostname("weather")
 
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
     if wlan.isconnected():
-        print('Wifi connected as {}/{}, net={}, gw={}, dns={}'.format(network.hostname(), *wlan.ifconfig()))
+        print('Wifi already connected as {}/{}, net={}, gw={}, dns={}'.format(network.hostname(), *wlan.ifconfig()))
         return wlan
 
+    print("Connecting to WiFi...")
     wlan.connect(ssid, password)
     start = time.time()
     while not wlan.isconnected() and (time.time() - start) < timeout_s:
@@ -120,6 +92,8 @@ def connect_wifi(ssid, password, timeout_s=30):
 
     if not wlan.isconnected():
         raise RuntimeError("Wi-Fi connect failed")
+    
+    print('Wifi connected as {}/{}, net={}, gw={}, dns={}'.format(network.hostname(), *wlan.ifconfig()))
     return wlan
 
 
@@ -150,6 +124,58 @@ def load_wifi_credentials():
     return ssid, password
 
 
+def load_location_config():
+    """Load location and timezone configuration from NVS.
+    
+    Returns:
+        (location_name, location_state, tz_offset_seconds, dst_enabled)
+    
+    Raises:
+        RuntimeError: If any required configuration is missing from NVS
+    """
+    nvs = esp32.NVS(NVS_NAMESPACE)
+    
+    location_name = _nvs_get_text(nvs, NVS_KEY_LOCATION_NAME)
+    if not location_name:
+        raise RuntimeError(
+            "Location name missing in NVS (%s:%s)"
+            % (NVS_NAMESPACE, NVS_KEY_LOCATION_NAME)
+        )
+    
+    location_state = _nvs_get_text(nvs, NVS_KEY_LOCATION_STATE)
+    if not location_state:
+        raise RuntimeError(
+            "Location state missing in NVS (%s:%s)"
+            % (NVS_NAMESPACE, NVS_KEY_LOCATION_STATE)
+        )
+    
+    # NVS stores as blob, retrieve as int by unpacking
+    try:
+        tz_offset_buf = bytearray(4)
+        nvs.get_blob(NVS_KEY_TIMEZONE_OFFSET, tz_offset_buf)
+        tz_offset_seconds = struct.unpack('>i', bytes(tz_offset_buf))[0]
+    except OSError:
+        raise RuntimeError(
+            "Timezone offset missing in NVS (%s:%s)"
+            % (NVS_NAMESPACE, NVS_KEY_TIMEZONE_OFFSET)
+        )
+    
+    try:
+        dst_enabled_buf = bytearray(1)
+        nvs.get_blob(NVS_KEY_DST_ENABLED, dst_enabled_buf)
+        dst_enabled = dst_enabled_buf[0] != 0
+    except OSError:
+        raise RuntimeError(
+            "DST enabled flag missing in NVS (%s:%s)"
+            % (NVS_NAMESPACE, NVS_KEY_DST_ENABLED)
+        )
+    
+    print("Config: %s, %s | TZ offset: %d sec (UTC%+.1f) | DST: %s" % (
+        location_name, location_state, tz_offset_seconds, tz_offset_seconds / 3600, dst_enabled))
+    
+    return location_name, location_state, tz_offset_seconds, dst_enabled
+
+
 def http_get_json(url, retries=3, delay=2):
     last_exc = None
     for attempt in range(retries):
@@ -170,26 +196,40 @@ def http_get_json(url, retries=3, delay=2):
     return {}
 
 
-def resolve_bom_location():
+def resolve_bom_location(location_query=None, location_state=None):
+    """Resolve location name and geohash from BOM API.
+    
+    Args:
+        location_query: Location name (default: from global config)
+        location_state: State code (default: from global config)
+    
+    Returns:
+        (geohash, location_name) tuple
+    """
+    if location_query is None:
+        location_query = _LOCATION_CONFIG["name"]
+    if location_state is None:
+        location_state = _LOCATION_CONFIG["state"]
+        
     if BOM_LOCATION_GEOHASH:
-        return BOM_LOCATION_GEOHASH, BOM_LOCATION_QUERY
+        return BOM_LOCATION_GEOHASH, location_query
 
-    search_url = "%s/locations?search=%s" % (BOM_API_BASE, urlencode_simple(BOM_LOCATION_QUERY))
+    search_url = "%s/locations?search=%s" % (BOM_API_BASE, urlencode_simple(location_query))
     payload = http_get_json(search_url)
     locations = payload.get("data") or []
     if not locations:
-        raise RuntimeError("No BOM location result for '%s'" % BOM_LOCATION_QUERY)
+        raise RuntimeError("No BOM location result for '%s'" % location_query)
 
     preferred = None
     for location in locations:
-        if (location.get("state") or "").upper() == BOM_LOCATION_STATE.upper():
+        if (location.get("state") or "").upper() == location_state.upper():
             preferred = location
             break
 
     if preferred is None:
         preferred = locations[0]
 
-    loc_name = preferred.get("name", BOM_LOCATION_QUERY)
+    loc_name = preferred.get("name", location_query)
     loc_state = preferred.get("state")
     if loc_state:
         loc_name = "%s, %s" % (loc_name, loc_state)
@@ -499,153 +539,19 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
     fb_black = framebuf.FrameBuffer(land_black, bmp_width, bmp_height, framebuf.MONO_HMSB)
     fb_yellow = framebuf.FrameBuffer(land_color, bmp_width, bmp_height, framebuf.MONO_HMSB)
 
-    # 1=White/Background, 0=Black/Ink?
-    # User sees White Text on Black BG with: Fill(1) and Text(0).
-    # This implies 1=Black, 0=White on User Device.
-    # To get White BG, we need 0. To get Black Text we need 1.
-    
-    # INVERTING COLORS: Dark Mode (White Text on Black Background)
-    # Background (Fill) = 1 (Black)
-    # Text (Ink) = 0 (White)
+    # Dark Mode (White Text on Black Background)
     fb_black.fill(1)
     fb_yellow.fill(0)
 
-    days = forecast.get("days") or []
-    if not days:
-        _draw_text_compat(fb_black, 12, 12, "No forecast", 0)
-        return _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height)
-
-    # BOM Index 0: Today (derived from date + 1 logic)
-    # BOM Index 1: Tomorrow
-    if len(days) < 2:
-        # Not enough data, fallback
-        today = days[0] if days else {}
-        forecast_list = []
+    # Use WeatherDisplay module if available
+    if WeatherDisplay:
+        display = WeatherDisplay(fb_black, fb_yellow, _draw_text_compat, _draw_icon,
+                                draw_bmp_icon, _month_name, bmp_width, bmp_height)
+        display.render(forecast)
     else:
-        # Today's detailed panel comes from Index 0
-        today = days[0]
-        # 5-day forecast starting from Tomorrow (Index 1)
-        forecast_list = days[1:6]
-
-    divider_x = 300
-    panel_x = divider_x + 6
-    panel_w = bmp_width - panel_x - 8
-    card_h = 31
-    card_gap = 4
-    top_pad = 2
-
-    # Vertical divider stopped slightly short of top/bottom
-    v_pad = 10
-    fb_black.vline(divider_x, v_pad, bmp_height - (v_pad * 2), 0)
-
-    for idx, day in enumerate(forecast_list):
-        y0 = top_pad + idx * (card_h + card_gap)
-        
-        # Draw horizontal delimiter line between days (but not after the last one)
-        if idx < len(forecast_list) - 1:
-            line_y = y0 + card_h + (int(card_gap / 2))
-            fb_black.hline(panel_x, line_y, panel_w, 0)
-
-        # Use the weekday from the corrected date logic
-        weekday = day.get("weekday", "---")
-
-        high_txt = "%s°" % ("--" if day.get("temp_max") is None else str(day.get("temp_max")))
-        low_txt = "%s°" % ("--" if day.get("temp_min") is None else str(day.get("temp_min")))
-
-        _draw_text_compat(fb_black, panel_x + 6, y0 + 12, weekday, 0)
-        _draw_icon(fb_black, fb_yellow, panel_x + 50, y0, day.get("icon"), compact=True)
-        # Low temp on left (black), High temp on right (yellow)
-        _draw_text_compat(fb_black, panel_x + 90, y0 + 12, low_txt, 0)
-        _draw_text_compat(fb_yellow, panel_x + 134, y0 + 12, high_txt, 1)
-
-    # Prepare Today Text
-    now_data = today.get("now")
-    
-    if now_data:
-        # Use dynamic labels from API
-        label_1 = str(now_data.get("now_label", "Now"))
-        val_1 = "%s°" % now_data.get("temp_now", "--")
-        label_2 = str(now_data.get("later_label", "Later"))
-        val_2 = "%s°" % now_data.get("temp_later", "--")
-    else:
-        # Fallback to standard High/Low
-        label_1 = "High"
-        val_1 = "%s°" % ("--" if today.get("temp_max") is None else str(today.get("temp_max")))
-    if now_data:
-        label_1 = str(now_data.get("now_label", "Now"))
-        val_1 = "%s°" % now_data.get("temp_now", "--")
-        label_2 = str(now_data.get("later_label", "Later"))
-        val_2 = "%s°" % now_data.get("temp_later", "--")
-    else:
-        label_1 = "High"
-        val_1 = "%s°" % ("--" if today.get("temp_max") is None else str(today.get("temp_max")))
-        label_2 = "Low"
-        val_2 = "%s°" % ("--" if today.get("temp_min") is None else str(today.get("temp_min")))
-    
-    r_low = today.get("rain_lower", 0)
-    r_high = today.get("rain_upper", 0)
-
-    # Check for None just in case, though get defaults to 0 above only if key missing
-    if r_low is None: r_low = 0
-    if r_high is None: r_high = 0
-    
-    # e.g. TODAY - Sunday 14 Feb
-    today_date_str = "TODAY"
-    t_weekday = today.get("weekday", "")
-    t_day_num = today.get("day_num", 0)
-    t_month_num = today.get("month_num", 0)
-    
-    # Map short weekday to full
-    full_days = {
-        "Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", 
-        "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"
-    }
-
-    if t_weekday and t_day_num and t_month_num:
-        full_day = full_days.get(t_weekday, t_weekday)
-        abbr_month = _month_name(t_month_num)[:3]
-        today_date_str += " - %s %d %s" % (full_day, t_day_num, abbr_month)
-
-    _draw_text_compat(fb_yellow, 14, 8, today_date_str, 1)
-    
-    # 1. Main Weather Icon (Left)
-    _draw_icon(fb_black, fb_yellow, 20, 33, today.get("icon"))
-    
-    # 2. Vertical Divider
-    div_x = 115
-    fb_black.vline(div_x, 33, 60, 0) # 0 is white ink
-    
-    # 3. Raindrops Icon (Right of divider)
-    draw_bmp_icon(fb_black, fb_yellow, 130, 33, "raindrops", "_b")
-        
-    # 4. Rain Value (Right of Rain Icon)
-    r_high = today.get("rain_upper", 0)
-    if r_high is None: r_high = 0
-    
-    rain_txt = "%s mm" % r_high
-        
-    # 5. Draw rain value next to raindrops icon
-    _draw_text_compat(fb_yellow, 200, 53, rain_txt, 1, scale=3)
-    
-    # Render Today Stats (Lowered)
-    y_stats = 110
-    
-    # Text Alignment Logic:
-    lbl1_w = len(label_1) * 12
-    lbl2_w = len(label_2) * 12
-    max_lbl_w = max(lbl1_w, lbl2_w)
-    val_x = 14 + max_lbl_w + 12 
-    
-    line_spacing = 30
-    
-    # Line 1 (High/Now)
-    _draw_text_compat(fb_black, 14, y_stats + 3, label_1, 0)
-    _draw_text_compat(fb_yellow, val_x, y_stats, val_1, 1, scale=3)
-    
-    # Line 2 (Low/Later)
-    y_line2 = y_stats + line_spacing
-    _draw_text_compat(fb_black, 14, y_line2 + 3, label_2, 0)
-    _draw_text_compat(fb_yellow, val_x, y_line2, val_2, 1, scale=3)
+        # Fallback for minimal rendering
+        if not forecast.get("days"):
+            _draw_text_compat(fb_black, 12, 12, "No forecast", 0)
 
     return _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height)
 
@@ -800,189 +706,16 @@ def bmp_to_raw_bw_color(path, bmp_width, bmp_height, display_width, display_heig
     return bytes(black_plane) + bytes(color_plane)
 
 
-def requested_parts_from_mask(mask_bytes):
-    parts = []
-    for part_id in range(PARTS_PER_BLOCK):
-        byte_index = part_id // 8
-        bit_index = part_id % 8
-        if byte_index < len(mask_bytes):
-            if (mask_bytes[byte_index] >> bit_index) & 0x01:
-                parts.append(part_id)
-    return parts
-
-
-def build_block_part(image_data, block_id, part_id):
-    block_start = block_id * BLOCK_DATA_SIZE
-    block_payload = image_data[block_start:block_start + BLOCK_DATA_SIZE]
-
-    block_header = struct.pack("<HH", len(block_payload), sum16(block_payload))
-    wrapped = block_header + block_payload
-
-    part_start = part_id * BLOCK_PART_DATA_SIZE
-    part_data = wrapped[part_start:part_start + BLOCK_PART_DATA_SIZE]
-    if len(part_data) < BLOCK_PART_DATA_SIZE:
-        part_data += b"\x00" * (BLOCK_PART_DATA_SIZE - len(part_data))
-
-    block_part_no_crc = bytes([block_id & 0xFF, part_id & 0xFF]) + part_data
-    block_part_crc = sum8(block_part_no_crc)
-    return bytes([block_part_crc]) + block_part_no_crc
-
-
-async def find_device(target_addr):
-    print("Scanning for", target_addr)
-    async with aioble.scan(
-        duration_ms=10000,
-        interval_us=30000,
-        window_us=30000,
-        active=True,
-    ) as scanner:
-        async for result in scanner:
-            addr = result.device.addr_hex()
-            print(" ", addr, end="\r")
-            await asyncio.sleep_ms(20)
-            if addr == target_addr:
-                print("\nFound", addr)
-                return result.device
-    print("\nScan timeout")
-    return None
-
-
-async def wait_notification(ch, timeout_s=10):
-    return await asyncio.wait_for(ch.notified(), timeout=timeout_s)
-
-
-async def send_cmd(ch, cmd_id, payload=b""):
-    packet = cmd_packet(cmd_id, payload)
-    await ch.write(packet, response=False)
-
-
-async def send_part_wait_ack(ch, block_part_payload):
-    while True:
-        await send_cmd(ch, CMD_SEND_BLOCK_PART, block_part_payload)
-        while True:
-            raw = await wait_notification(ch, timeout_s=10)
-            rsp_cmd, _ = parse_cmd(raw)
-            if rsp_cmd == RSP_PART_ACK:
-                return None
-            if rsp_cmd == RSP_PART_ERROR:
-                break
-            if rsp_cmd == RSP_COMMAND_ACK:
-                continue
-            if rsp_cmd in (RSP_BLOCK_REQUEST, RSP_UPLOAD_COMPLETE, RSP_DATA_PRESENT):
-                return raw
-            if rsp_cmd == RSP_ERROR:
-                raise RuntimeError("Device returned protocol error (0xFFFF)")
-            print("Ignoring part-wait notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
-
-
-async def wait_ready_ack(ch):
-    while True:
-        raw = await wait_notification(ch, timeout_s=10)
-        rsp_cmd, _ = parse_cmd(raw)
-        if rsp_cmd == RSP_COMMAND_ACK:
-            return None
-        if rsp_cmd in (RSP_BLOCK_REQUEST, RSP_UPLOAD_COMPLETE, RSP_DATA_PRESENT):
-            return raw
-        if rsp_cmd in (RSP_PART_ACK, RSP_PART_ERROR):
-            continue
-        if rsp_cmd == RSP_ERROR:
-            raise RuntimeError("Device returned protocol error (0xFFFF)")
-        print("Ignoring ready-wait notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
-
-
-async def upload_image(ch, image_data, data_type):
-    print("Image bytes:", len(image_data))
-    total_blocks = int(math.ceil(len(image_data) / BLOCK_DATA_SIZE))
-    print("Total blocks:", total_blocks)
-
-    avail = make_avail_data_info(image_data, data_type)
-    await send_cmd(ch, CMD_START_DATA_TRANSFER, avail)
-
-    completed = False
-    pending_raw = None
-    while not completed:
-        if pending_raw is not None:
-            raw = pending_raw
-            pending_raw = None
-        else:
-            raw = await wait_notification(ch, timeout_s=20)
-        rsp_cmd, rsp_payload = parse_cmd(raw)
-
-        if rsp_cmd == RSP_BLOCK_REQUEST:
-            if len(rsp_payload) < 17:
-                raise RuntimeError("Invalid BlockRequest payload")
-
-            req_block_id = rsp_payload[9]
-            req_type = rsp_payload[10]
-            req_parts_mask = rsp_payload[11:17]
-            req_parts = requested_parts_from_mask(req_parts_mask)
-
-            print("Block request: block=%d type=0x%02X parts=%s" % (req_block_id, req_type, req_parts))
-            if req_block_id >= total_blocks:
-                raise RuntimeError("Device requested out-of-range block %d" % req_block_id)
-
-            await send_cmd(ch, CMD_ACK_READY)
-            pending_raw = await wait_ready_ack(ch)
-            if pending_raw is not None:
-                continue
-
-            for part_id in req_parts:
-                block_part = build_block_part(image_data, req_block_id, part_id)
-                pending_raw = await send_part_wait_ack(ch, block_part)
-                if pending_raw is not None:
-                    break
-
-        elif rsp_cmd == RSP_UPLOAD_COMPLETE:
-            print("Upload complete (device confirmed)")
-            await send_cmd(ch, CMD_TRANSFER_COMPLETE)
-            completed = True
-
-        elif rsp_cmd == RSP_DATA_PRESENT:
-            print("Device reports identical data already present")
-            await send_cmd(ch, CMD_TRANSFER_COMPLETE)
-            completed = True
-
-        elif rsp_cmd == RSP_COMMAND_ACK:
-            pass
-
-        elif rsp_cmd in (RSP_PART_ACK, RSP_PART_ERROR):
-            pass
-
-        elif rsp_cmd == RSP_ERROR:
-            raise RuntimeError("Device returned protocol error (0xFFFF)")
-
-        else:
-            print("Ignoring notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
-
-
-async def run_update_cycle():
+async def run_update_cycle(wlan):
+    """Fetch weather, render display, and upload to BLE device.
+    
+    Args:
+        wlan: Connected WiFi network object (from connect_wifi)
+    """
     target_addr = sys.argv[1].lower() if len(sys.argv) > 1 else TARGET_ADDR
-    data_type = DEFAULT_DATA_TYPE
 
+    # Fetch and render weather image
     if USE_WEATHER_SOURCE:
-        # Check wifi state first
-        wlan = network.WLAN(network.STA_IF)
-        if not wlan.isconnected():
-            print("Connecting Wi-Fi...")
-            wifi_ssid, wifi_password = load_wifi_credentials()
-            print("Wi-Fi SSID:", wifi_ssid)
-            
-            wifi_success = False
-            for i in range(1, CONNECT_RETRIES + 1):
-                try:
-                    # Use a shorter timeout per attempt since we have many retries
-                    connect_wifi(wifi_ssid, wifi_password, timeout_s=10)
-                    wifi_success = True
-                    break
-                except Exception as e:
-                    print("Wi-Fi connect attempt %d/%d failed: %s" % (i, CONNECT_RETRIES, e))
-                    time.sleep(1)
-            
-            if not wifi_success:
-                raise RuntimeError("Wi-Fi connection failed after %d attempts" % CONNECT_RETRIES)
-        else:
-            print("Wi-Fi already connected")
-
         print("Fetching BOM daily forecast...")
         forecast = None
         for i in range(5):
@@ -1006,141 +739,130 @@ async def run_update_cycle():
         image_data = bmp_to_raw_bw_color(BMP_PATH, BMP_WIDTH, BMP_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT)
         print("Loaded BMP:", BMP_PATH, "-> raw bytes:", len(image_data))
 
-    device = await find_device(target_addr)
-    # Checks removed to allow loop to handle retry/scan
-    
-    conn = None
-    last_error = None
-    for attempt in range(1, CONNECT_RETRIES + 1):
-        if not device:
-            print("Connect attempt %d/%d skipped (device not found)" % (attempt, CONNECT_RETRIES))
-            if attempt < CONNECT_RETRIES:
-                await asyncio.sleep_ms(CONNECT_RETRY_DELAY_MS)
-                device = await find_device(target_addr)
-            continue
-
+    # Upload to BLE display
+    if BLEDisplay:
         try:
-            print("Connect attempt %d/%d" % (attempt, CONNECT_RETRIES))
-            conn = await device.connect(timeout_ms=10000)
-            break
-        except Exception as exc:
-            last_error = exc
-            print("Connect failed:", exc)
-            if attempt < CONNECT_RETRIES:
-                await asyncio.sleep_ms(CONNECT_RETRY_DELAY_MS)
-                device = await find_device(target_addr)
-                if not device:
-                    print("Retry scan did not find device")
+            display = BLEDisplay(target_addr, 
+                               connect_retries=CONNECT_RETRIES,
+                               connect_retry_delay_ms=CONNECT_RETRY_DELAY_MS)
+            await display.upload(image_data)
+        except Exception as e:
+            print("BLE upload failed:", e)
+            raise
+    else:
+        print("Error: BLEDisplay module not available")
+        print("Make sure ble_display.py is uploaded to the device")
+        raise RuntimeError("Failed to import BLE display module")
 
-    if conn is None:
-        raise RuntimeError("Unable to connect after retries: %s" % last_error)
+# Global timezone config
+_TZ_CONFIG = {
+    "tz_offset": DEFAULT_TZ_OFFSET_SECONDS,
+    "dst_enabled": DEFAULT_DST_ENABLED
+}
 
-    try:
-        await conn.exchange_mtu(247)
-
-        service = await conn.service(SERVICE_UUID)
-        if not service:
-            raise RuntimeError("Service 0x1337 not found")
-
-        ch = await service.characteristic(CHAR_UUID)
-        if not ch:
-            raise RuntimeError("Characteristic 0x1337 not found")
-
-        await ch.subscribe(notify=True)
-        await asyncio.sleep_ms(300)
-
-        await upload_image(ch, image_data, data_type)
-        print("Done")
-
-    finally:
-        if conn:
-            await conn.disconnect()
+# Global location config
+_LOCATION_CONFIG = {
+    "name": BOM_LOCATION_QUERY,
+    "state": BOM_LOCATION_STATE
+}
 
 
+def set_timezone_config(tz_offset_seconds, dst_enabled):
+    """Set global timezone configuration."""
+    global _TZ_CONFIG
+    _TZ_CONFIG["tz_offset"] = tz_offset_seconds
+    _TZ_CONFIG["dst_enabled"] = dst_enabled
 
-def get_melbourne_time():
-    # Returns (year, month, day, hour, minute, second, wday, yday) in Melbourne Time
-    # DST Rules:
-    # Starts 1st Sunday Oct @ 2am Standard (become 3am DST) -> UTC 16:00 previous day? No.
-    # Ends 1st Sunday Apr @ 3am DST (become 2am Standard)
-    # But easier to work with UTC timestamps.
+
+def set_location_config(location_name, location_state):
+    """Set global location configuration."""
+    global _LOCATION_CONFIG
+    _LOCATION_CONFIG["name"] = location_name
+    _LOCATION_CONFIG["state"] = location_state
+
+
+def get_local_time():
+    """Returns (year, month, day, hour, minute, second, wday, yday) in local time.
     
+    Uses timezone offset and DST settings from configuration.
+    For Australian locations with DST: activates 1st Sunday Oct to 1st Sunday Apr.
+    For locations without DST: uses fixed offset year-round.
+    """
     t_utc = time.time()
-    tm = time.localtime(t_utc)
-    year = tm[0]
-
-    # Find 1st Sunday in April (End DST)
-    # Find 1st Sunday in October (Start DST)
+    year = time.localtime(t_utc)[0]
     
+    tz_offset = _TZ_CONFIG["tz_offset"]
+    dst_enabled = _TZ_CONFIG["dst_enabled"]
+    
+    if not dst_enabled:
+        # Simple fixed offset (no DST)
+        return time.localtime(t_utc + tz_offset)
+    
+    # Australian DST rules: 1st Sunday Oct @ 2am Standard -> 1st Sunday Apr @ 3am DST
     def get_sunday(y, m):
-        # Basic mktime for 1st of month to find weekday
-        # time.localtime(time.mktime(...)) handles basic logic
-        # 0=Mon, 6=Sun
         t_start = time.mktime((y, m, 1, 0, 0, 0, 0, 0))
         wday = time.localtime(t_start)[6]
-        # Days to add to get to Sunday (6)
-        # If 0 (Mon), add 6. If 6 (Sun), add 0.
         days = (6 - wday + 7) % 7
         return 1 + days
 
     apr_day = get_sunday(year, 4)
     oct_day = get_sunday(year, 10)
     
-    # DST Ends: April [apr_day] at 03:00 AEDT (UTC+11) -> 16:00 UTC previous day (start of DST)
-    # Actually, simpler:
-    # 03:00 AEDT = 16:00 UTC (previous day)
-    # 02:00 AEST = 16:00 UTC (previous day)
+    # DST End: April apr_day 03:00 DST (UTC+11) -> UTC 16:00 previous day
+    dst_end_utc = time.mktime((year, 4, apr_day, 3, 0, 0, 0, 0)) - 39600  # 11h
     
-    # Let's compare seconds from epoch.
-    # DST End: April apr_day 03:00 Local Daylight Time (UTC+11) -> (year, 4, apr_day, 3, 0, 0) in +11
-    # UTC time = Local - 11h
-    # 3am - 11h = 16:00 previous day.
-    dst_end_utc = time.mktime((year, 4, apr_day, 3, 0, 0, 0, 0)) - 39600 # 11h
+    # DST Start: Oct oct_day 02:00 Standard (UTC+10) -> UTC 16:00 previous day
+    dst_start_utc = time.mktime((year, 10, oct_day, 2, 0, 0, 0, 0)) - 36000  # 10h
     
-    # DST Start: Oct oct_day 02:00 Local Standard Time (UTC+10) -> (year, 10, oct_day, 2, 0, 0) in +10
-    # UTC time = Local - 10h
-    # 2am - 10h = 16:00 previous day.
-    dst_start_utc = time.mktime((year, 10, oct_day, 2, 0, 0, 0, 0)) - 36000 # 10h
-    
-    # Check if current UTC time is within DST period
-    # DST is active if: t_utc < dst_end_utc OR t_utc >= dst_start_utc (Southern Hemisphere Summer)
+    # DST active: Oct->Apr (Southern Hemisphere)
     is_dst = (t_utc < dst_end_utc) or (t_utc >= dst_start_utc)
     
-    offset = 39600 if is_dst else 36000
+    # Use DST offset (+1 hour) if active
+    offset = tz_offset + (3600 if is_dst else 0)
     return time.localtime(t_utc + offset)
 
 
 async def main():
     print("Device starting main loop...")
+    
+    # Load configuration from NVS
+    location_name, location_state, tz_offset_sec, dst_enabled = load_location_config()
+    set_location_config(location_name, location_state)
+    set_timezone_config(tz_offset_sec, dst_enabled)
+    
     while True:
         try:
-            # 1. Connect Wi-Fi and Sync Time (Daily NTP)
+            # 1. Connect Wi-Fi once per cycle
+            wlan = None
             if USE_WEATHER_SOURCE:
-                print("Connecting Wi-Fi...")
                 wifi_ssid, wifi_password = load_wifi_credentials()
+                print("Wi-Fi SSID:", wifi_ssid)
                 
-                connected = False
-                for _ in range(3):
+                wifi_success = False
+                for i in range(1, CONNECT_RETRIES + 1):
                     try:
-                        connect_wifi(wifi_ssid, wifi_password)
-                        connected = True
+                        wlan = connect_wifi(wifi_ssid, wifi_password, timeout_s=10)
+                        wifi_success = True
                         break
                     except Exception as e:
-                        print("Wi-Fi retry:", e)
-                        await asyncio.sleep(5)
+                        print("Wi-Fi connect attempt %d/%d failed: %s" % (i, CONNECT_RETRIES, e))
+                        time.sleep(1)
                 
-                if connected and ntptime:
+                if not wifi_success:
+                    raise RuntimeError("Wi-Fi connection failed after %d attempts" % CONNECT_RETRIES)
+                
+                # 2. Sync NTP time
+                if ntptime:
                     print("Syncing NTP...")
                     try:
                         ntptime.settime()
-                        # Debug Print Local Time
-                        t_mel = get_melbourne_time()
-                        print("Time synced (Melbourne): %04d-%02d-%02d %02d:%02d:%02d" % (t_mel[0], t_mel[1], t_mel[2], t_mel[3], t_mel[4], t_mel[5]))
+                        t_mel = get_local_time()
+                        print("Time synced (local): %04d-%02d-%02d %02d:%02d:%02d" % (t_mel[0], t_mel[1], t_mel[2], t_mel[3], t_mel[4], t_mel[5]))
                     except Exception as e:
                         print("NTP sync failed:", e)
-                
-            # 2. Check Schedule
-            tm = get_melbourne_time()
+            
+            # 3. Run scheduled update
+            tm = get_local_time()
             hour = tm[3]
             minute = tm[4]
             
@@ -1148,7 +870,7 @@ async def main():
             success = False
             for attempt in range(3):
                 try:
-                    await run_update_cycle()
+                    await run_update_cycle(wlan)
                     success = True
                     break
                 except Exception as e:
@@ -1156,11 +878,11 @@ async def main():
                     await asyncio.sleep(10)
             
             if not success:
-               print("Update cycle failed after 3 attempts. Skipping to next scheduled slot.")
+                print("Update cycle failed after 3 attempts. Skipping to next scheduled slot.")
             
-            # 3. Calculate sleep until next slot
+            # 4. Calculate sleep until next slot
             # Slots: 05:30, 13:00 (Local Time)
-            tm = get_melbourne_time() # Refresh time after update
+            tm = get_local_time() # Refresh time after update
             h, m = tm[3], tm[4]
             current_minutes = h * 60 + m
             current_seconds_in_day = current_minutes * 60 + tm[5]
