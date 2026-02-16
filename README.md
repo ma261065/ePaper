@@ -18,7 +18,7 @@ OpenEPaperlink list a bunch of compatible displays [here](https://github.com/Ope
 
 So, the next step was to crack it open. At first sight this looked impossible - there were no screws or obvious seams. The whole unit appeared to be one solid plastic blob. On further inspection, I thought it might be possible to slide a spudger into the join between the screen and the body. Luckily I had exactly the right tool lying around:
 
-![A metal spudger](pictures/spudger.jpg)
+![A metal spudger](pictures/Spudger.jpg)
 
 With this tool, and a lot of very careful pressure and scraping I was able to get the tip under the perspex screen cover, and then very carefully work my way around the whole screen until it finally released.
 
@@ -28,11 +28,11 @@ I won't understate how hard this was. If this is not working for you, or you don
 
 Once the device was opened I could get a better look at the insides.
 
-![Opened device](pictures/opened.jpg)
+![Opened device](pictures/Opened.jpg)
 
 The first thing I noticed was the nicely labeled pads, which I thought I would be able to use to flash the OpenEPaperlink firmware, but [these aren't the pins you're looking for](https://en.wikipedia.org/wiki/These_aren%27t_the_droids_you%27re_looking_for).
 
-![The wrong pins](pictures/wrongpads.jpg)
+![The wrong pins](pictures/WrongPads.jpg)
 
 To get at the actual flashing pins, we need to do another step of disassembly. Undo the one screw that holds the board down, and then we have to pry the battery out. It is held by some pretty tough double-sided tape, and the combined with the flexibility of the battery makes it pretty hard to get out. I used a flat plastic spudger to slowly lever it out, trying not to bend the battery too much, and pushing quite forcefully to slice through the tape.
 
