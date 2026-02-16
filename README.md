@@ -88,12 +88,12 @@ After about 20 seconds the firmware will be written, and if it is successful, yo
 Take note of the MAC addresss, as you will need it later.
 
 ## Alternative to opening the device
-The section above showed a clean way to get into the device to flash the firmware, but this can be quite tricky to do.
+The section above showed a non-destructive way to get into the device to flash the firmware, but this can be quite tricky to do.
 
 An alternative is to use a soldering iron to melt holes through the back of the case in line with the flashing pins. This [video](https://www.youtube.com/watch?v=WRfZJ4xyYwc) shows the process, and if you want to hang this device from your fridge, you will be gluing a flat magnet to the back anyway, which will cover the holes.
 
 ## Send test data to the device
-The OpenEPaperLink is designed to work with an [access point](https://openepaperlink.org/aps), but you can also send data to the display using Bluetooth Low Energy (BLE).
+The OpenEPaperLink firmware is designed to work with an [access point](https://openepaperlink.org/aps), but you can also send data to the display using Bluetooth Low Energy (BLE).
 
 If you want to quickly see what the display looks like with your own images, I found the **BLE Connectiom** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
 
@@ -117,7 +117,7 @@ You may need to tweak this for your country's weather service if you are outside
 This project is configured to work with any location in Australia without code modifications. Follow these steps:
 
 ### 1. Upload firmware to ESP32
-Flash the latest MicroPython firmware to your device. There are a number of tools that can do this, but I find the simplest to be [ESPTool](https://espressif.github.io/esptool-js/).
+Flash the latest [MicroPython firmware](https://micropython.org/download/) to your device. There are a number of tools that can do this, but I find the simplest to be [ESPTool](https://espressif.github.io/esptool-js/).
 
 ### 2. Find your ePaper device's BLE address
 Before configuring, you need the Bluetooth MAC address of your ePaper display:
@@ -150,11 +150,15 @@ python verify_nvs.py --port COM10
 ```
 
 ### 4. Upload code to the ESP32
+If you don't have `mpremote` installed: `pip install --user mpremote` 
+
+Then copy all the required files to the ESP32:
 ```bash
 python -m mpremote connect COM10 cp weather.py :weather.py
 python -m mpremote connect COM10 cp display.py :display.py
 python -m mpremote connect COM10 cp ble_display.py :ble_display.py
 python -m mpremote connect COM10 cp bitmap_font.py :bitmap_font.py
+python -m mpremote connect COM10 cp -r icons : 
 ```
 
 ### 5. Run the application
