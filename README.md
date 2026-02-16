@@ -6,15 +6,15 @@ After walking over, I saw that it was one of the electronic price displays which
 
 ![A found object](pictures/Found.jpg)
 
-To an obsessive tinkerer like me, this was like finding the [Welcome Stranger](https://en.wikipedia.org/wiki/Welcome_Stranger). I immediately thought of a thousand uses for such a low-powered ePaper display and took it home, and started doing some research.
+To an obsessive tinkerer like me, this was like finding the [Welcome Stranger](https://en.wikipedia.org/wiki/Welcome_Stranger). I immediately thought of a thousand uses for such a low-powered ePaper display, took it home, and started doing some research.
 
 ## Flashing the display
 
-The first thing I found was the [OpenEPaperLink](https://openepaperlink.org) project which produces an alternative firmware for these sorts of displays. But was it compatible with mine?
+The first thing I found was the [OpenEPaperLink](https://openepaperlink.org) project which produces an alternative firmware for these sorts of ePaper displays. But was it compatible with mine?
 
 ![Back of the device](pictures/Back.jpg)
 
-Mine was a **Hanshow Neubular-346Y-N**, which according to Hanshows's [product manual](https://fccid.io/2AHB5-NEBULAR-350/User-Manual/UM-4928993.pdf) means it is 3.46", with a Black/White/Yellow display and equipped with NFC.
+Mine was a **Hanshow Neubular-346Y-N**, which according to Hanshow's [product manual](https://fccid.io/2AHB5-NEBULAR-350/User-Manual/UM-4928993.pdf) means it is 3.46", with a Black/White/Yellow display and equipped with NFC.
 
 OpenEPaperlink list a bunch of compatible displays [here](https://github.com/OpenEPaperLink/OpenEPaperLink/wiki#tags), but it wasn't clear if mine was one of the supported ones, as I didn't know which processor it used.
 
@@ -22,25 +22,25 @@ So, the next step was to crack it open. At first sight this looked impossible - 
 
 ![A metal spudger](pictures/Spudger.jpg)
 
-With this tool, and a lot of very careful pressure and scraping I was able to get the tip under the perspex screen cover, and then very carefully work my way around the whole screen until it finally released.
+With this tool, and a lot of very careful pressure and scraping, I was able to get the tip under the perspex screen cover, and then very carefully work my way around the whole screen until it finally released.
 
 ![Prying the screen open](pictures/PryingOpen.jpg)
 
-I won't understate how hard this was. If this is not working for you, or you don't have the right tool have a look (here) for an alternative method that doesn't involve opening the device.
+I won't understate how hard this was. If this is not working for you, or you don't have the right tool have a look [here](#Alternative-to-opening-the-device) for an alternative method that doesn't involve opening the device.
 
 Once the device was opened I could get a better look at the insides.
 
 ![Opened device](pictures/Opened.jpg)
 
-The first thing I noticed was the nicely labeled pads, which I thought I would be able to use to flash the OpenEPaperlink firmware, but [these aren't the pins you're looking for](https://en.wikipedia.org/wiki/These_aren%27t_the_droids_you%27re_looking_for).
+The first thing I noticed was the nicely labeled pads, which I thought I would be able to use to flash the OpenEPaperlink firmware, but [these aren't the pads you're looking for](https://en.wikipedia.org/wiki/These_aren%27t_the_droids_you%27re_looking_for).
 
-![The wrong pins](pictures/WrongPads.jpg)
+![The wrong pads](pictures/WrongPads.jpg)
 
-To get at the actual flashing pins, we need to do another step of disassembly. Undo the one screw that holds the board down, and then we have to pry the battery out. It is held by some pretty tough double-sided tape, and the combined with the flexibility of the battery makes it pretty hard to get out. I used a flat plastic spudger to slowly lever it out, trying not to bend the battery too much, and pushing quite forcefully to slice through the tape.
+To get at the actual flashing pads, we need to do another step of disassembly. Undo the one screw that holds the board down, and then we have to pry the battery out. It is held in by some pretty tough double-sided tape, and that combined with the flexibility of the battery makes it pretty hard to get out. I used a flat plastic spudger to slowly lever it out, trying not to bend the battery too much, and pushing quite forcefully to slice through the tape.
 
 ![Removing the battery](pictures/PryBattery.jpg)
 
-Eventually you will be rewarded with the battery popping out, and will be able to get to the flashing pins on the other side of the board.
+Eventually you will be rewarded with the battery popping out, and will be able to get to the flashing pads on the other side of the board.
 
 ![The flashing pins](pictures/Pads.jpg)
 
@@ -50,7 +50,7 @@ This didn't look like any of the controllers mentioned in the OpenEPaperLink sup
 
 But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so I though I may as well try it.
 
-You will need a USB to Serial adapter board - I like the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. They also split out the DTR pin, which not all boards do.
+You will need a USB to Serial adapter board - I like the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
 
 Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
 
@@ -88,7 +88,7 @@ After about 20 seconds the firmware will be written, and if it is successful, yo
 Take note of the MAC addresss, as you will need it later.
 
 ## Alternative to opening the device
-The section above showed a clean way to get into the device to flash the firmware, but can be quite tricky to do.
+The section above showed a clean way to get into the device to flash the firmware, but this can be quite tricky to do.
 
 An alternative is to use a soldering iron to melt holes through the back of the case in line with the flashing pins. This [video](https://www.youtube.com/watch?v=WRfZJ4xyYwc) shows the process, and if you want to hang this device from your fridge, you will be gluing a flat magnet to the back anyway, which will cover the holes.
 
@@ -108,7 +108,7 @@ So, always up for the challenge, I thought I'd roll my own. It is not an Access 
 
 After a bit of reverse engineering using some [BLE Debugging scripts](#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
 
-Once that was done, I wrote a simple app to scan for the display's BLE advertisement, then connect to it and send some image data to it. For the image data I made a simple web call to to Australian Bureau of Meterology web API to gather some weather data.
+Once that was done, I wrote a simple app to scan for the display's BLE advertisement, then connect to it and send some image data to it. For the image data I made a simple web call to to Australian Bureau of Meteorology web API to gather some weather data.
 
 You may need to tweak this for your country's weather service if you are outside Australia, but the principles remain the same and I'm sure that you can figure it out.
 
@@ -117,7 +117,7 @@ You may need to tweak this for your country's weather service if you are outside
 This project is configured to work with any location in Australia without code modifications. Follow these steps:
 
 ### 1. Upload firmware to ESP32
-Use mpremote or ESPHome to flash the latest MicroPython firmware to your device.
+Flash the latest MicroPython firmware to your device. There are a number of tools that can do this, but I find the simplest to be [ESPTool](https://espressif.github.io/esptool-js/).
 
 ### 2. Find your ePaper device's BLE address
 Before configuring, you need the Bluetooth MAC address of your ePaper display:
@@ -130,7 +130,7 @@ If you didn't make note of the device's MAC address when you first flashed the f
 5. Note this down for the next step
 
 ### 3. Configure device settings
-To avoid storing secrets (e.g. WiFi password) in code, the app takes all configuration data from the ESP32's non-volatile storage (NVS). Run the configuration script **on your PC** to set your Wi-Fi credentials, location, timezone, and BLE device address:
+To avoid storing secrets (e.g. WiFi password) in code, the app takes all configuration data from the ESP32's non-volatile storage (NVS). Run the configuration script **on your PC** before running the ESP32 app to set your Wi-Fi credentials, location, timezone, and BLE device address:
 
 ```bash
 python set_config_nvs.py --port COM10
@@ -163,12 +163,13 @@ python -m mpremote connect COM10 run weather.py
 ```
 
 The ESP32 should connect to your WiFi network using the credentials stored in NVS, then scan for the MAC address of the display and connect to it once found.
-It then call the Australian Bureau of Meterology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
+It then call the Australian Bureau of Meteorology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
 
 You should see the weather display on the screen:
 
 ![Weather Display](pictures/WeatherDisplay.jpg)
 
+The app is designed to run twice a day to update the display. The Hanshow data sheet shows that the battery should last 10 to 15 years with a twice-daily update. Of course you can refresh the weather data as often as you like, but the battery life will suffer accordingly.
 
 ## Configuration Details
 
@@ -194,7 +195,7 @@ Current Australian timezone support:
 The codebase is modular to allow reuse of the display protocol implementation in other projects:
 
 - **weather.py**: Main application
-  - Weather data fetching from BOM API
+  - Weather data fetching from BoM API
   - Display image rendering
   - WiFi and NTP time synchronization
   - Update scheduling (5:30 AM, 1:00 PM local time)
@@ -206,39 +207,41 @@ The codebase is modular to allow reuse of the display protocol implementation in
   - Dependencies: framebuf, weather data dict
   - Reusable for any weather display project
 
-- **ble_display.py**: BLE protocol implementation)
+- **ble_display.py**: BLE protocol implementation
   - `BLEDisplay` class - handles all OpenEPaperLink BLE communication
-  - Built on: aioble, bluetooth, asyncio
+  - Built on: aioble & asyncio
   - Data format constants and protocol handlers
   - Can be imported and used in any project that needs to control an ePaper display over BLE
 
-- **bitmap_font.py**: A simple font implementation)
-- Defines the font used on the display
+    **Example usage:**
+    ```python
+    from ble_display import BLEDisplay
 
-  **Example usage:**
-  ```python
-  from ble_display import BLEDisplay
-  
-  display = BLEDisplay(target_addr="3c:60:55:84:a0:42")
-  image_data = ...  # Your image bytes (see protocol.md)
-  await display.upload(image_data)
-  ```
+    display = BLEDisplay(target_addr="3c:60:55:84:a0:42")
+    image_data = ...  # Your image bytes (see protocol.md)
+    await display.upload(image_data)
+    ```
 
-- **set_config_nvs.py**: Interactive setup script
+- **bitmap_font.py**: A simple font implementation
+  - Defines the font used on the display
+
+- **set_config_nvs.py**: Interactive setup script - run on PC
   - Prompts for WiFi credentials, location, and timezone
   - Stores everything in ESP32 NVS (persistent storage)
   - Australian state/territory support with automatic timezone/DST selection
 
-**verify_nvs.py**: Interactive setup script
-- Reads the NVS parameters stored on the device
-- Allows verifying that all data is stroed correctly
+- **verify_nvs.py**: Validation script - run on PC
+  - Reads the NVS parameters stored on the device
+  - Allows verifying that all data is stroed correctly
 
 ## BLE Debugging
 
-This script might be handy if you are doing your own protocol reverse engineering.
+This [monkey patch](https://en.wikipedia.org/wiki/Monkey_patch) script might be handy if you are doing your own protocol reverse engineering.
+
+You don't need to do this for this project, but this is what I used to see the BLE protocol used by the web app, so documenting it here for future reference.
 
 Put these commands in the browser debug console to trace BLE packets sent by a web app. 
-Then run your web app, and you will see exactly what it sends and receives.
+Then run your web app, and you will see exactly what it sends and receives. 
 
 ```javascript
 // Log GATT connect
