@@ -307,6 +307,7 @@ class BLEDisplay:
                 else:
                     print("Ignoring notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
 
+            print("Upload complete (device confirmed)")
             print("Done")
 
         finally:

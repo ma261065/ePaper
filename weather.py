@@ -374,10 +374,10 @@ ICON_MAP = {
     "light_shower": "rain",
     "heavy_shower": "rain", 
     "storm": "storm",
-    "snow": "rain",  # Melbourne rarely gets snow, map to rain or cloudy
+    "snow": "rain", 
     "frost": "fog",
     "wind": "cloudy",
-    "raindrops": "raindrops", # New icon
+    "raindrops": "raindrops", 
 }
 
 def draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, size_suffix="_s"):
@@ -412,8 +412,6 @@ def draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, size_suffix="_s"):
                 # Read palette. 
                 # Assumes standard BITMAPINFOHEADER (40 bytes). 
                 # Palette starts at 14 + 40 = 54. 
-                # Or just read from 54 up to pixel_offset?
-                # Ideally, read from end of header method.
                 f.seek(14)
                 dib_header_size = struct.unpack('<I', f.read(4))[0]
                 palette_offset = 14 + dib_header_size
@@ -435,7 +433,6 @@ def draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, size_suffix="_s"):
             height = abs(height)
             
             # Simple clipped constraints
-            
             for r in range(height):
                 src_y = r if is_top_down else (height - 1 - r)
                 f.seek(pixel_offset + (src_y * row_size))
@@ -769,6 +766,7 @@ async def run_update_cycle(wlan):
                                connect_retries=CONNECT_RETRIES,
                                connect_retry_delay_ms=CONNECT_RETRY_DELAY_MS)
             await display.upload(image_data)
+            print("Weather display updated successfully.")
         except Exception as e:
             print("BLE upload failed:", e)
             raise

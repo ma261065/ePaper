@@ -1,5 +1,91 @@
 # ePaper Weather Display
 
+Recently, while walking back to the car after a shop at my local supermarket, I spotted something on the ground that caught my eye. What was it?
+
+After walking over, I saw that it was one of the electronic price displays which the Supermarket uses on its shelves. 
+
+![A found object](pictures/Found.jpg)
+
+To an obsessive tinkerer like me, this was like finding the [Welcome Stranger](https://en.wikipedia.org/wiki/Welcome_Stranger). I immediately thought of a thousand uses for such a low-powered ePaper display and took it home, and started doing some research.
+
+The first thing I found was the [OpenEPaperLink](https://openepaperlink.de/) project which produces an alternative firmware for these sorts of displays. But was it compatible with mine?
+
+![Back of the device](pictures/Back.jpg)
+
+Mine was a **Hanshow Neubular-346Y-N**, which according to Hanshows's [product manual](https://fccid.io/2AHB5-NEBULAR-350/User-Manual/UM-4928993.pdf) means it is 3.46", with a Black/White/Yellow display and equipped with NFC.
+
+OpenEPaperlink list a bunch of compatible displays [here](https://github.com/OpenEPaperLink/OpenEPaperLink/wiki#tags), but it wasn't clear if mine was one of the supported ones, as I didn't know which processor it used.
+
+So, the next step was to crack it open. At first sight this looked impossible - there were no screws or obvious seams. The whole unit appeared to be one solid plastic blob. On further inspection, I thought it might be possible to slide a spudger into the join between the screen and the body. Luckily I had exactly the right tool lying around:
+
+![A metal spudger](pictures/spudger.jpg)
+
+With this tool, and a lot of very careful pressure and scraping I was able to get the tip under the perspex screen cover, and then very carefully work my way around the whole screen until it finally released.
+
+![Prying the screen open](pictures/PryingOpen.jpg)
+
+I won't understate how hard this was. If this is not working for you, or you don't have the right tool have a look (here) for an alternative method that doesn't involve opening the device.
+
+Once the device was opened I could get a better look at the insides.
+
+![Opened device](pictures/opened.jpg)
+
+The first thing I noticed was the nicely labeled pads, which I thought I would be able to use to flash the OpenEPaperlink firmware, but [these aren't the pins you're looking for](https://en.wikipedia.org/wiki/These_aren%27t_the_droids_you%27re_looking_for).
+
+![The wrong pins](pictures/wrongpads.jpg)
+
+To get at the actual flashing pins, we need to do another step of disassembly. Undo the one screw that holds the board down, and then we have to pry the battery out. It is held by some pretty tough double-sided tape, and the combined with the flexibility of the battery makes it pretty hard to get out. I used a flat plastic spudger to slowly lever it out, trying not to bend the battery too much, and pushing quite forcefully to slice through the tape.
+
+![Removing the battery](pictures/PryBattery.jpg)
+
+Eventually you will be rewarded with the battery popping out, and will be able to get to the flashing pins on the other side of the board.
+
+![The flashing pins](pictures/Pads.jpg)
+
+At this point we can also see which controller the display uses - a Hanshow-branded **HS9117**.
+
+This didn't look like any of the controllers mentioned in the OpenEPaperLink supported devices page, so I wasn't holding out much hope of their firmware working.
+
+But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so I though I may as well try it.
+
+You will need a USB to Serial adapter board - I like the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. They also split out the DTR pin, which not all boards do.
+
+Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
+
+![USB to Serial converter](pictures/SerialBoard.jpg)
+
+The next step takes some tricky dexterity, as you have to hold three wires against the three flashing pads. You may want to solder them if you can't hold them steady for the 20 seconds or so that it takes to flash the firmware.
+
+To flash the OpenEPaperLink firmware onto the display use the UART Flasher section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html.
+
+![Serial Flasher](pictures/SerialFlasher.jpg)
+
+- Make the connections to the display:
+
+  | Flasher | Display |
+  |:--------|:------|
+  | Gnd | Gnd |
+  | TxD | SWS |
+  | DTR | RST |
+
+  ![Holding wires](pictures/HoldingWires.jpg)
+
+Using your non-existent third hand, click **Open** to connect to the COM Port where your USB Serial to TTL board is connected:
+
+
+- Select your display type from the **Set Device Type** drop-down (I chose the closest I could find, which was **350 HS BWY UC**)
+- Click **Load ATC_BLE_OEPL.bin**
+- Click **Write Firmware & Type**
+
+  (You may need to click "Unlock Flash" the first time you do this)
+
+After about 20 seconds the firmware will be written, and if it is successful, you will be greeted with the following display:
+
+![Successful flash](pictures/successfulflash.jpg)
+
+Take note of the MAC addresss, as you will need it later.
+
+
 ## Setup for Australian Users
 
 This project is configured to work with any location in Australia without code modifications. Follow these steps:
@@ -111,16 +197,6 @@ The codebase is modular to allow reuse of the display protocol implementation in
 - Allows verifying that all data is stroed correctly
 
 ## BLE Debugging
-
-To flash the OpenEPaperLink firmware onto the device use the UART Flasher section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html
-After connecting to a COM Port where your USB Serial -> TTL board is connected:
-- Make the connections to the display: Gnd - > Gnd, TxD -> SWS, DTR -> NRST
-- Select your display type from the Set Device Type drop-down
-- Click "Load ATC_BLE_OEPL.bin"
-- Click "Write Firmware & Type"
-(You may need to click "Unlock Flash" the first time you do this)
- 
-===
 
 This might be handy if you are doing youyr own protocol reverse engineering.
 
