@@ -8,7 +8,9 @@ After walking over, I saw that it was one of the electronic price displays which
 
 To an obsessive tinkerer like me, this was like finding the [Welcome Stranger](https://en.wikipedia.org/wiki/Welcome_Stranger). I immediately thought of a thousand uses for such a low-powered ePaper display and took it home, and started doing some research.
 
-The first thing I found was the [OpenEPaperLink](https://openepaperlink.de/) project which produces an alternative firmware for these sorts of displays. But was it compatible with mine?
+## Flashing the display
+
+The first thing I found was the [OpenEPaperLink](https://openepaperlink.org) project which produces an alternative firmware for these sorts of displays. But was it compatible with mine?
 
 ![Back of the device](pictures/Back.jpg)
 
@@ -70,7 +72,7 @@ To flash the OpenEPaperLink firmware onto the display use the UART Flasher secti
 
   ![Holding wires](pictures/HoldingWires.jpg)
 
-Using your non-existent third hand, click **Open** to connect to the COM Port where your USB Serial to TTL board is connected:
+- Using your non-existent third hand, click **Open** to connect to the COM Port where your USB Serial to TTL board is connected:
 
 
 - Select your display type from the **Set Device Type** drop-down (I chose the closest I could find, which was **350 HS BWY UC**)
@@ -81,10 +83,34 @@ Using your non-existent third hand, click **Open** to connect to the COM Port wh
 
 After about 20 seconds the firmware will be written, and if it is successful, you will be greeted with the following display:
 
-![Successful flash](pictures/successfulflash.jpg)
+![Successful flash](pictures/SuccessfulFlash.jpg)
 
 Take note of the MAC addresss, as you will need it later.
 
+## Alternative to opening the device
+The section above showed a clean way to get into the device to flash the firmware, but can be quite tricky to do.
+
+An alternative is to use a soldering iron to melt holes through the back of the case in line with the flashing pins. This [video](https://www.youtube.com/watch?v=WRfZJ4xyYwc) shows the process, and if you want to hang this device from your fridge, you will be gluing a flat magnet to the back anyway, which will cover the holes.
+
+## Send test data to the device
+The OpenEPaperLink is designed to work with an [access point](https://openepaperlink.org/aps), but you can also send data to the display using Bluetooth Low Energy (BLE).
+
+If you want to quickly see what the display looks like with your own images, I found the **BLE Connectiom** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
+
+![BLE Connection](pictures/BLEConnection.jpg)
+
+Use the section at the top of the web page to load images or write text and send it to the display via BLE. Note that when you hit **Connect** you may need to wait quite some time (over a minute sometimes) for your display to show up. It will have a name in the format ATC_xxxxxx.
+
+## Using an ESP32 to send data to the display
+As mentioned above, the OpenEPaperLink firmware is designed to work with an [access point](https://openepaperlink.org/aps). However they all either need 2 x ESP32s or an ESP32 plus another price display for the radio. There is a [BLE only AP](https://github.com/OpenEPaperLink/OpenEPaperLink/wiki/BLE-only-AP) but it says that it doesn't support Hanshow displays.
+
+So, always up for the challenge, I thought I'd roll my own. It is not an Access Point in the true sense that OpenEPaperLink uses the term, but rather a BLE-sender that mimics the web page used in the section above.
+
+After a bit of reverse engineering using some [BLE Debugging scripts](#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
+
+Once that was done, I wrote a simple app to scan for the display's BLE advertisement, then connect to it and send some image data to it. For the image data I made a simple web call to to Australian Bureau of Meterology web API to gather some weather data.
+
+You may need to tweak this for your country's weather service if you are outside Australia, but the principles remain the same and I'm sure that you can figure it out.
 
 ## Setup for Australian Users
 
@@ -96,17 +122,15 @@ Use mpremote or ESPHome to flash the latest MicroPython firmware to your device.
 ### 2. Find your ePaper device's BLE address
 Before configuring, you need the Bluetooth MAC address of your ePaper display:
 
-**Using nRF Connect (Recommended):**
+If you didn't make note of the device's MAC address when you first flashed the firmware, you can use the **nRF Connect** app on your phone to scan for the display.
 1. Download [nRF Connect](https://www.nordicsemiconductor.com/products/nrf-connect-for-mobile/) for Android or iOS
 2. Open the app and tap **"Scan"**
-3. Look for your device name (e.g., "OEPL" or similar)
+3. Look for your device name (e.g. "ATC_xxxxxx" or similar)
 4. The address shown (format: `XX:XX:XX:XX:XX:XX`) is your target address
 5. Note this down for the next step
 
-Alternatively, check your device's documentation or any label on the device itself.
-
 ### 3. Configure device settings
-Run the configuration script on your PC to set your Wi-Fi credentials, location, timezone, and BLE device address:
+To avoid storing secrets (e.g. WiFi password) in code, the app takes all configuration data from the ESP32's non-volatile storage (NVS). Run the configuration script **on your PC** to set your Wi-Fi credentials, location, timezone, and BLE device address:
 
 ```bash
 python set_config_nvs.py --port COM10
@@ -120,7 +144,12 @@ The script will prompt you for:
 
 Timezone and DST settings are automatically configured based on your state selection.
 
-### 4. Upload code to device
+You can verify if the settings were stored correctly using the verify script:
+```bash
+python verify_nvs.py --port COM10
+```
+
+### 4. Upload code to the ESP32
 ```bash
 python -m mpremote connect COM10 cp weather.py :weather.py
 python -m mpremote connect COM10 cp display.py :display.py
@@ -132,6 +161,14 @@ python -m mpremote connect COM10 cp bitmap_font.py :bitmap_font.py
 ```bash
 python -m mpremote connect COM10 run weather.py
 ```
+
+The ESP32 should connect to your WiFi network using the credentials stored in NVS, then scan for the MAC address of the display and connect to it once found.
+It then call the Australian Bureau of Meterology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
+
+You should see the weather display on the screen:
+
+![Weather Display](pictures/WeatherDisplay.jpg)
+
 
 ## Configuration Details
 
@@ -198,11 +235,12 @@ The codebase is modular to allow reuse of the display protocol implementation in
 
 ## BLE Debugging
 
-This might be handy if you are doing youyr own protocol reverse engineering.
+This script might be handy if you are doing your own protocol reverse engineering.
 
 Put these commands in the browser debug console to trace BLE packets sent by a web app. 
 Then run your web app, and you will see exactly what it sends and receives.
 
+```javascript
 // Log GATT connect
 const origConnect = BluetoothRemoteGATTServer.prototype.connect;
 BluetoothRemoteGATTServer.prototype.connect = async function () {
@@ -254,7 +292,7 @@ BluetoothRemoteGATTCharacteristic.prototype.startNotifications = async function 
 };
 
 console.log("BLE logging patches installed ✓");
-
+```
 
 
 
