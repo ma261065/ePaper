@@ -71,6 +71,7 @@ def urlencode_simple(value):
 
 def connect_wifi(ssid, password, timeout_s=30):
     # Enable external antenna on Seeed Studio ESP32-C6
+    # Comment out the 4 lines below if you are not using a Seeed ESP32-C6, or if you want to use the internal antenna
     wifi_switch_enable = machine.Pin(WIFI_SWITCH_ENABLE_PIN, machine.Pin.OUT)
     wifi_ant_config = machine.Pin(WIFI_ANT_CONFIG_PIN, machine.Pin.OUT)
     wifi_switch_enable.value(0)

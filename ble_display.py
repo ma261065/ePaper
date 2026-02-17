@@ -184,7 +184,6 @@ class BLEDisplay:
                 continue
             if rsp_cmd == RSP_ERROR:
                 raise RuntimeError("Device returned protocol error (0xFFFF)")
-            print("Ignoring ready-wait notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
     
     async def upload(self, image_data, data_type=None):
         """Upload image data to the display.
@@ -199,9 +198,7 @@ class BLEDisplay:
         target_addr = self.target_addr
         
         # Render image
-        print("Image bytes:", len(image_data))
         total_blocks = int(math.ceil(len(image_data) / BLOCK_DATA_SIZE))
-        print("Total blocks:", total_blocks)
 
         avail = make_avail_data_info(image_data, data_type)
         
@@ -224,8 +221,6 @@ class BLEDisplay:
                 conn = await device.connect(timeout_ms=10000)
                 break
             except Exception as exc:
-                last_error = exc
-                print("Connect failed:", exc)
                 if attempt < self.connect_retries:
                     await asyncio.sleep_ms(self.connect_retry_delay_ms)
                     device = None
@@ -269,7 +264,7 @@ class BLEDisplay:
                     req_parts_mask = rsp_payload[11:17]
                     req_parts = requested_parts_from_mask(req_parts_mask)
 
-                    print("Block %d: requesting %d parts" % (req_block_id, len(req_parts)))
+                    print("Block request: block=%d type=0x%02x sent=[" % (req_block_id, req_type), end="")
                     if req_block_id >= total_blocks:
                         raise RuntimeError("Device requested out-of-range block %d" % req_block_id)
 
@@ -278,12 +273,16 @@ class BLEDisplay:
                     if pending_raw is not None:
                         continue
 
-                    for part_id in req_parts:
+                    for i, part_id in enumerate(req_parts):
                         block_part = build_block_part(image_data, req_block_id, part_id)
                         pending_raw = await self._send_part_wait_ack(ch, block_part)
-                        print("  Part %d/%d sent" % (part_id + 1, PARTS_PER_BLOCK))
+                        if i < len(req_parts) - 1:
+                            print("%d, " % part_id, end="")
+                        else:
+                            print("%d" % part_id, end="")
                         if pending_raw is not None:
                             break
+                    print("]")
 
                 elif rsp_cmd == RSP_UPLOAD_COMPLETE:
                     print("Upload complete (device confirmed)")
@@ -307,7 +306,6 @@ class BLEDisplay:
                 else:
                     print("Ignoring notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
 
-            print("Upload complete (device confirmed)")
             print("Done")
 
         finally:

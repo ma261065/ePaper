@@ -112,6 +112,11 @@ Once that was done, I wrote a simple app to scan for the display's BLE advertise
 
 You may need to tweak this for your country's weather service if you are outside Australia, but the principles remain the same and I'm sure that you can figure it out.
 
+I used a [Seeed Studio ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) for this project, but you can use any ESP32 with enough memory (I tried an ESP32-C3, but it does not have enough memory). Be aware that the code assumes that you have an external antenna connected, and this is selected in `connect_wifi()` in `weather.py`. If you want to use the internal antenna on this board, you will have to comment out the first few lines in `connect_wifi()`.
+
+![ESP32-C6](pictures/ESP32.jpg)
+
+
 ## Setup for Australian Users
 
 This project is configured to work with any location in Australia without code modifications. Follow these steps:
@@ -236,7 +241,7 @@ The codebase is modular to allow reuse of the display protocol implementation in
 
 - **verify_nvs.py**: Validation script - run on PC
   - Reads the NVS parameters stored on the device
-  - Allows verifying that all data is stroed correctly
+  - Allows verifying that all data is stored correctly
 
 ## BLE Debugging
 
