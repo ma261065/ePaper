@@ -26,7 +26,7 @@ With this tool, and a lot of very careful pressure and scraping, I was able to g
 
 ![Prying the screen open](pictures/PryingOpen.jpg)
 
-I won't understate how hard this was. If this is not working for you, or you don't have the right tool have a look [here](#Alternative-to-opening-the-device) for an alternative method that doesn't involve opening the device.
+I won't understate how hard this was. If this is not working for you, or you don't have the right tool have a look [here](#Alternative-to-opening-the-device) for an alternative method that doesn't involve opening the device. Also, I have read (but haven't tried) that using a hot-air heatgun to carefully heat around the edge of the display will loosen the adhesive and make it easier to remove.
 
 Once the device was opened I could get a better look at the insides.
 
