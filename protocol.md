@@ -1,7 +1,11 @@
 # OpenEPaperLink (ATC_BLE_OEPL BLE) Protocol Specification
-Code is at https://github.com/atc1441/atc1441.github.io/blob/55c13baf3a7f634d98ad7ee7e15dd7913e30996a/ATC_BLE_OEPL_Image_Upload.html#L1850
+The OpenEPaperLink web app is at https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html
 
-## Connection Details
+The code for this is at https://github.com/atc1441/atc1441.github.io/blob/55c13baf3a7f634d98ad7ee7e15dd7913e30996a/ATC_BLE_OEPL_Image_Upload.html
+
+From thuis code and observing the BLE traffic that it sends, I was able to determine the protocol that it uses to talk to the OpenEPaperLink firmware. Note that this is reverse-engineered, so there may be some errors - it is not an official protocol description.
+
+## BLE Connection Details
 Service UUID: 0x1337
 
 Characteristic UUID: 0x1337
@@ -157,7 +161,7 @@ struct ImageHeader {
 };
 ```
 
-Dynamic Configuration Structure
+#### Dynamic Configuration Structure - Received with 0x0011
 Total size varies based on enabled peripherals:
 ```C++
 cstruct DynamicConfig {
@@ -204,22 +208,8 @@ cstruct DynamicConfig {
     uint16_t flash_CS, flash_CLK, flash_MISO, flash_MOSI;
 };
 ```
-
-**GPIO Pin Encoding:**
-```
-0x0000 = None
-0x00XX = Port A, bit XX (e.g., 0x0001=PA0, 0x0080=PA7)
-0x01XX = Port B
-0x02XX = Port C
-0x03XX = Port D
-0x04XX = Port E
-```
-
-**Pull Types:** `0=Float, 1=Pullup 1M, 2=Pulldown 100K, 3=Pullup 10K`
-
----
-
-So for each 4096-byte block of image data:
+### Image transfer protocol
+For each 4096-byte block of image data:
 
 A 4-byte header is prepended to each part → 4096 + 4 = 4100 bytes total per part
 This gets sliced into 230-byte chunks for BlockParts
@@ -232,7 +222,7 @@ Part 17 (last): Only 190 bytes real data (4100 - 17×230 = 190), padded to 230
 
 Actual Throughput Per Block
 PartBytes in PartBlock HeaderActual Image Data023042261-16230023017230 (190 real + 40 padding)0190
-Total per 4KB block: 226 + (16 × 230) + 190 = 4096 bytes ✓
+Total per 4KB block: 226 + (16 × 230) + 190 = 4096 bytes
 
 ### Transfer Flow Example
 ```
