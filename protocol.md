@@ -217,13 +217,6 @@ Part 0 contains: 4-byte block header + 226 bytes of actual data
 Parts 1-17 contain: 230 bytes of actual data each
 Part 17 (last): Only 190 bytes real data (4100 - 17×230 = 190), padded to 230
 
-80 02 = 0x0280 = 640 bytes of payload in this block (this must be a partial/final block)
-00 00 = CRC = 0 (the payload is all zeros, so sum is 0)
-
-Actual Throughput Per Block
-PartBytes in PartBlock HeaderActual Image Data023042261-16230023017230 (190 real + 40 padding)0190
-Total per 4KB block: 226 + (16 × 230) + 190 = 4096 bytes
-
 ### Transfer Flow Example
 ```
 1. Host sends: 0x0064 + AvailDataInfo(crc32, size, type=0x30)
