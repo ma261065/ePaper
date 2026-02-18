@@ -52,6 +52,8 @@ But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&
 
 You will need a USB to Serial adapter board - I prefer the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
 
+Make sure to set the output to 3.3V
+
 Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
 
 ![USB to Serial converter](pictures/SerialBoard.jpg)
