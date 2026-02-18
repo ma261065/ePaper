@@ -106,7 +106,7 @@ As mentioned above, the OpenEPaperLink firmware is designed to work with an [acc
 
 So, always up for the challenge, I thought I'd roll my own. It is not an Access Point in the true sense that OpenEPaperLink uses the term, but rather a BLE-sender that mimics the web page used in the section above.
 
-After a bit of reverse engineering using some [BLE Debugging scripts](#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
+After a bit of reverse engineering using some [BLE Debugging scripts](protocol.md#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
 
 Once that was done, I wrote a simple app to scan for the display's BLE advertisement, then connect to it and send some image data to it. For the image data I made a simple web call to to Australian Bureau of Meteorology web API to gather some weather data.
 
