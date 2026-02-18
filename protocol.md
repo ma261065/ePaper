@@ -212,10 +212,15 @@ cstruct DynamicConfig {
 For each 4096-byte block of image data:
 
 A 4-byte header is prepended to each part → 4096 + 4 = 4100 bytes total per part
+
 This gets sliced into 230-byte chunks for BlockParts
+
 Part 0 contains: 4-byte block header + 226 bytes of actual data
+
 Parts 1-17 contain: 230 bytes of actual data each
+
 Part 17 (last): Only 190 bytes real data (4100 - 17×230 = 190), padded to 230
+
 
 ### Transfer Flow Example
 ```
