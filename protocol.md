@@ -3,7 +3,7 @@ The OpenEPaperLink web app is at https://atc1441.github.io/ATC_BLE_OEPL_Image_Up
 
 The code for this is at https://github.com/atc1441/atc1441.github.io/blob/55c13baf3a7f634d98ad7ee7e15dd7913e30996a/ATC_BLE_OEPL_Image_Upload.html
 
-From thuis code and observing the BLE traffic that it sends, I was able to determine the protocol that it uses to talk to the OpenEPaperLink firmware. Note that this is reverse-engineered, so there may be some errors - it is not an official protocol description.
+From this code and observing the BLE traffic that it sends, I was able to determine the protocol that it uses to talk to the OpenEPaperLink firmware. Note that this is reverse-engineered, so there may be some errors - it is not an official protocol description.
 
 ## BLE Connection Details
 Service UUID: 0x1337
