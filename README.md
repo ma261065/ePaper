@@ -44,7 +44,7 @@ Eventually you will be rewarded with the battery popping out, and will be able t
 
 ![The flashing pins](pictures/Pads.jpg)
 
-At this point we can also see which controller the display uses - a Hanshow-branded **HS9117**.
+At this point we can also see which controller the display uses - a Hanshow-branded **HS9118**.
 
 This didn't look like any of the controllers mentioned in the OpenEPaperLink supported devices page, so I wasn't holding out much hope of their firmware working.
 
@@ -242,71 +242,6 @@ The codebase is modular to allow reuse of the display protocol implementation in
 - **verify_nvs.py**: Validation script - run on PC
   - Reads the NVS parameters stored on the device
   - Allows verifying that all data is stored correctly
-
-## BLE Debugging
-
-This [monkey patch](https://en.wikipedia.org/wiki/Monkey_patch) script might be handy if you are doing your own protocol reverse engineering.
-
-You don't need to do this for this project, but this is what I used to see the BLE protocol used by the web app, so documenting it here for future reference.
-
-Put these commands in the browser debug console to trace BLE packets sent by a web app. 
-Then run your web app, and you will see exactly what it sends and receives. 
-
-```javascript
-// Log GATT connect
-const origConnect = BluetoothRemoteGATTServer.prototype.connect;
-BluetoothRemoteGATTServer.prototype.connect = async function () {
-  console.log("GATT CONNECT START");
-  const result = await origConnect.call(this);
-  console.log("GATT CONNECT SUCCESS");
-  return result;
-};
-
-// Log service discovery
-const origGetService = BluetoothRemoteGATTServer.prototype.getPrimaryService;
-BluetoothRemoteGATTServer.prototype.getPrimaryService = async function (uuid) {
-  console.log("GET SERVICE", uuid);
-  return origGetService.call(this, uuid);
-};
-
-// Log characteristic discovery
-const origGetChar = BluetoothRemoteGATTService.prototype.getCharacteristic;
-BluetoothRemoteGATTService.prototype.getCharacteristic = async function (uuid) {
-  console.log("GET CHARACTERISTIC", uuid);
-  return origGetChar.call(this, uuid);
-};
-
-// Log writes with response
-const origWrite = BluetoothRemoteGATTCharacteristic.prototype.writeValue;
-BluetoothRemoteGATTCharacteristic.prototype.writeValue = async function (value) {
-  const bytes = new Uint8Array(value.buffer || value);
-  console.log("BLE WRITE (response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  return origWrite.call(this, value);
-};
-
-// Log writes without response
-const origWriteNoResp = BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse;
-BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse = async function (value) {
-  const bytes = new Uint8Array(value.buffer || value);
-  console.log("BLE WRITE (no response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  return origWriteNoResp.call(this, value);
-};
-
-// Log start notifications
-const origStart = BluetoothRemoteGATTCharacteristic.prototype.startNotifications;
-BluetoothRemoteGATTCharacteristic.prototype.startNotifications = async function () {
-  console.log("START NOTIFICATIONS UUID", this.uuid);
-  this.addEventListener("characteristicvaluechanged", (e) => {
-    const v = new Uint8Array(e.target.value.buffer);
-    console.log("NOTIFY UUID", this.uuid, "data", [...v].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  });
-  return origStart.call(this);
-};
-
-console.log("BLE logging patches installed ✓");
-```
-
-
 
 
 
