@@ -95,7 +95,7 @@ An alternative is to use a soldering iron to melt holes through the back of the 
 ## Send test data to the device
 The OpenEPaperLink firmware is designed to work with an [access point](https://openepaperlink.org/aps), but you can also send data to the display using Bluetooth Low Energy (BLE).
 
-If you want to quickly see what the display looks like with your own images, I found the **BLE Connectiom** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
+If you want to quickly see what the display looks like with your own images, I found the **BLE Connection** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
 
 ![BLE Connection](pictures/BLEConnection.jpg)
 
