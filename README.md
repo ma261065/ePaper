@@ -44,15 +44,13 @@ Eventually you will be rewarded with the battery popping out, and will be able t
 
 ![The flashing pins](pictures/Pads.jpg)
 
-At this point we can also see which controller the display uses - a Hanshow-branded **HS9118**.
+At this point we can also see which controller the display uses - a Hanshow-branded **HS9118**, which apparently has an embedded **TLSR8359** chip.
 
-This didn't look like any of the controllers mentioned in the OpenEPaperLink supported devices page, so I wasn't holding out much hope of their firmware working.
-
-But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so I though I may as well try it.
+I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so it seemed that this display should work.
 
 You will need a USB to Serial adapter board - I prefer the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
 
-Make sure to set the output to 3.3V
+Make sure to set the output to 3.3V. On my board this is done with a jumper, but other boards use DIP switches.
 
 Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
 
