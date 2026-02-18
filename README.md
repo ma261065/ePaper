@@ -174,7 +174,7 @@ python -m mpremote connect COM10 run weather.py
 ```
 
 The ESP32 should connect to your WiFi network using the credentials stored in NVS, then scan for the MAC address of the display and connect to it once found.
-It then call the Australian Bureau of Meteorology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
+It then calls the Australian Bureau of Meteorology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
 
 You should see the weather display on the screen:
 
