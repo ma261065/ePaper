@@ -50,7 +50,7 @@ This didn't look like any of the controllers mentioned in the OpenEPaperLink sup
 
 But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so I though I may as well try it.
 
-You will need a USB to Serial adapter board - I like the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
+You will need a USB to Serial adapter board - I prefer the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
 
 Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
 
@@ -112,7 +112,9 @@ Once that was done, I wrote a simple app to scan for the display's BLE advertise
 
 You may need to tweak this for your country's weather service if you are outside Australia, but the principles remain the same and I'm sure that you can figure it out.
 
-I used a [Seeed Studio ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) for this project, but you can use any ESP32 with enough memory (I tried an ESP32-C3, but it does not have enough memory). Be aware that the code assumes that you have an external antenna connected, and this is selected in `connect_wifi()` in `weather.py`. If you want to use the internal antenna on this board, you will have to comment out the first few lines in `connect_wifi()`.
+I used a [Seeed Studio ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) for this project, but you can use any ESP32 with enough memory (I tried an ESP32-C3, but it does not have enough memory). 
+
+Be aware that the code assumes that you have an external antenna connected, and this is selected in `connect_wifi()` in `weather.py`. If you want to use the internal antenna with the Seeed Studio ESP32-C6 board, or if you are using a different ESP32 board, you will have to edit the first few lines in `connect_wifi()` in `weather.py`. Make sure to actually connect an external antenna if running the code unmodified.
 
 ![ESP32-C6](pictures/ESP32.jpg)
 
@@ -128,7 +130,7 @@ Flash the latest [MicroPython firmware](https://micropython.org/download/) to yo
 Before configuring, you need the Bluetooth MAC address of your ePaper display:
 
 If you didn't make note of the device's MAC address when you first flashed the firmware, you can use the **nRF Connect** app on your phone to scan for the display.
-1. Download [nRF Connect](https://www.nordicsemiconductor.com/products/nrf-connect-for-mobile/) for Android or iOS
+1. Download [nRF Connect](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-mobile) for Android or iOS
 2. Open the app and tap **"Scan"**
 3. Look for your device name (e.g. "ATC_xxxxxx" or similar)
 4. The address shown (format: `XX:XX:XX:XX:XX:XX`) is your target address
