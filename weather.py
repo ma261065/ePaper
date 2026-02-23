@@ -306,10 +306,12 @@ def _get_tz_offset(t_utc=None):
 
 
 def _utc_date_to_local(date_iso):
-    """Convert a BOM UTC date/datetime string to local time tuple.
+    """Convert a BOM ISO date/datetime string to local time tuple.
     
-    Parses full ISO datetime (e.g., "2026-02-22T13:00:00Z") when available,
-    including DST-aware timezone offset.
+    Handles multiple ISO 8601 formats from BOM API:
+      - Date only:          "2026-02-24"          (treated as local date)
+      - UTC datetime:       "2026-02-23T13:00:00Z"
+      - Offset datetime:    "2026-02-24T00:00:00+11:00"
     
     Returns:
         time tuple (year, month, day, hour, min, sec, wday, yday) or None on error.
@@ -323,13 +325,36 @@ def _utc_date_to_local(date_iso):
     
     # Parse time component if present (e.g., "2026-02-22T13:00:00Z")
     hour, minute, second = 0, 0, 0
-    if len(date_iso) >= 19 and date_iso[10] == 'T':
+    has_time = len(date_iso) >= 19 and date_iso[10] == 'T'
+    if has_time:
         hour = int(date_iso[11:13])
         minute = int(date_iso[14:16])
         second = int(date_iso[17:19])
     
     try:
-        t_utc = time.mktime((year, month, day, hour, minute, second, 0, 0))
+        # Build epoch from parsed date/time components
+        t_parsed = time.mktime((year, month, day, hour, minute, second, 0, 0))
+        
+        if not has_time:
+            # Date-only string (e.g., "2026-02-24") — treat as local date.
+            # Return local time tuple directly; no UTC→local conversion needed.
+            return time.localtime(t_parsed)
+        
+        # Check for timezone info after the time component
+        tz_part = date_iso[19:]  # e.g., "Z", "+11:00", "+1100", "-05:00"
+        
+        if tz_part == 'Z' or tz_part == '':
+            # UTC timestamp or no timezone — treat as UTC
+            t_utc = t_parsed
+        else:
+            # Parse timezone offset: +HH:MM, -HH:MM, +HHMM, -HHMM
+            sign = 1 if tz_part[0] == '+' else -1
+            tz_str = tz_part[1:].replace(':', '')
+            tz_h = int(tz_str[0:2])
+            tz_m = int(tz_str[2:4]) if len(tz_str) >= 4 else 0
+            # Convert parsed local time to UTC by subtracting the source offset
+            t_utc = t_parsed - sign * (tz_h * 3600 + tz_m * 60)
+        
         return time.localtime(t_utc + _get_tz_offset(t_utc))
     except Exception:
         return None
