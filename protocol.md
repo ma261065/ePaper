@@ -1,7 +1,11 @@
 # OpenEPaperLink (ATC_BLE_OEPL BLE) Protocol Specification
-Code is at https://github.com/atc1441/atc1441.github.io/blob/55c13baf3a7f634d98ad7ee7e15dd7913e30996a/ATC_BLE_OEPL_Image_Upload.html#L1850
+The OpenEPaperLink web app is at https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html
 
-## Connection Details
+The code for this is at https://github.com/atc1441/atc1441.github.io/blob/55c13baf3a7f634d98ad7ee7e15dd7913e30996a/ATC_BLE_OEPL_Image_Upload.html
+
+From this code and [observing the BLE traffic that it sends](#ble-debugging), I was able to determine the protocol that it uses to talk to the OpenEPaperLink firmware. Note that this is reverse-engineered, so there may be some errors - it is not an official protocol description.
+
+## BLE Connection Details
 Service UUID: 0x1337
 
 Characteristic UUID: 0x1337
@@ -157,7 +161,7 @@ struct ImageHeader {
 };
 ```
 
-Dynamic Configuration Structure
+#### Dynamic Configuration Structure - Received with 0x0011
 Total size varies based on enabled peripherals:
 ```C++
 cstruct DynamicConfig {
@@ -204,35 +208,19 @@ cstruct DynamicConfig {
     uint16_t flash_CS, flash_CLK, flash_MISO, flash_MOSI;
 };
 ```
-
-**GPIO Pin Encoding:**
-```
-0x0000 = None
-0x00XX = Port A, bit XX (e.g., 0x0001=PA0, 0x0080=PA7)
-0x01XX = Port B
-0x02XX = Port C
-0x03XX = Port D
-0x04XX = Port E
-```
-
-**Pull Types:** `0=Float, 1=Pullup 1M, 2=Pulldown 100K, 3=Pullup 10K`
-
----
-
-So for each 4096-byte block of image data:
+### Image transfer
+For each 4096-byte block of image data:
 
 A 4-byte header is prepended to each part → 4096 + 4 = 4100 bytes total per part
+
 This gets sliced into 230-byte chunks for BlockParts
+
 Part 0 contains: 4-byte block header + 226 bytes of actual data
+
 Parts 1-17 contain: 230 bytes of actual data each
+
 Part 17 (last): Only 190 bytes real data (4100 - 17×230 = 190), padded to 230
 
-80 02 = 0x0280 = 640 bytes of payload in this block (this must be a partial/final block)
-00 00 = CRC = 0 (the payload is all zeros, so sum is 0)
-
-Actual Throughput Per Block
-PartBytes in PartBlock HeaderActual Image Data023042261-16230023017230 (190 real + 40 padding)0190
-Total per 4KB block: 226 + (16 × 230) + 190 = 4096 bytes ✓
 
 ### Transfer Flow Example
 ```
@@ -247,3 +235,66 @@ Total per 4KB block: 226 + (16 × 230) + 190 = 4096 bytes ✓
    ... repeat for all blocks ...
 8. Device responds: 0x00C7 (upload complete)
 9. Host sends: 0x0003 (transfer finished)
+```
+### BLE Debugging
+
+This [monkey patch](https://en.wikipedia.org/wiki/Monkey_patch) script might be handy if you are doing your own protocol reverse engineering.
+
+You don't need to do this for this project, but this is what I used to see the BLE protocol used by the web app, so documenting it here for future reference.
+
+Put these commands in the browser debug console to trace BLE packets sent by a web app. 
+Then run your web app, and you will see exactly what it sends and receives. 
+
+```javascript
+// Log GATT connect
+const origConnect = BluetoothRemoteGATTServer.prototype.connect;
+BluetoothRemoteGATTServer.prototype.connect = async function () {
+  console.log("GATT CONNECT START");
+  const result = await origConnect.call(this);
+  console.log("GATT CONNECT SUCCESS");
+  return result;
+};
+
+// Log service discovery
+const origGetService = BluetoothRemoteGATTServer.prototype.getPrimaryService;
+BluetoothRemoteGATTServer.prototype.getPrimaryService = async function (uuid) {
+  console.log("GET SERVICE", uuid);
+  return origGetService.call(this, uuid);
+};
+
+// Log characteristic discovery
+const origGetChar = BluetoothRemoteGATTService.prototype.getCharacteristic;
+BluetoothRemoteGATTService.prototype.getCharacteristic = async function (uuid) {
+  console.log("GET CHARACTERISTIC", uuid);
+  return origGetChar.call(this, uuid);
+};
+
+// Log writes with response
+const origWrite = BluetoothRemoteGATTCharacteristic.prototype.writeValue;
+BluetoothRemoteGATTCharacteristic.prototype.writeValue = async function (value) {
+  const bytes = new Uint8Array(value.buffer || value);
+  console.log("BLE WRITE (response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
+  return origWrite.call(this, value);
+};
+
+// Log writes without response
+const origWriteNoResp = BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse;
+BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse = async function (value) {
+  const bytes = new Uint8Array(value.buffer || value);
+  console.log("BLE WRITE (no response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
+  return origWriteNoResp.call(this, value);
+};
+
+// Log start notifications
+const origStart = BluetoothRemoteGATTCharacteristic.prototype.startNotifications;
+BluetoothRemoteGATTCharacteristic.prototype.startNotifications = async function () {
+  console.log("START NOTIFICATIONS UUID", this.uuid);
+  this.addEventListener("characteristicvaluechanged", (e) => {
+    const v = new Uint8Array(e.target.value.buffer);
+    console.log("NOTIFY UUID", this.uuid, "data", [...v].map(b=>b.toString(16).padStart(2,'0')).join(' '));
+  });
+  return origStart.call(this);
+};
+
+console.log("BLE logging patches installed ✓");
+```

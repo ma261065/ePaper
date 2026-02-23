@@ -44,13 +44,13 @@ Eventually you will be rewarded with the battery popping out, and will be able t
 
 ![The flashing pins](pictures/Pads.jpg)
 
-At this point we can also see which controller the display uses - a Hanshow-branded **HS9117**.
+At this point we can also see which controller the display uses - a Hanshow-branded **HS9118**, which apparently has an embedded **TLSR8359** chip.
 
-This didn't look like any of the controllers mentioned in the OpenEPaperLink supported devices page, so I wasn't holding out much hope of their firmware working.
+I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so it seemed that this display should work.
 
-But then I came across this [video](https://www.youtube.com/watch?v=9oKWkHGI-Yk&t=901s) which showed the OpenEPaperLink firmware being flashed onto an almost identical display, so I though I may as well try it.
+You will need a USB to Serial adapter board - I prefer the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
 
-You will need a USB to Serial adapter board - I like the CH343-based ones rather than ones with a FTDI chip, as you can avoid the dramas of [FTDI-Gate](https://hackaday.com/2016/02/01/ftdi-drivers-break-fake-chips-again/) which I have personally experienced. These boards also split out the DTR pin, which not all boards do.
+Make sure to set the output to 3.3V. On my board this is done with a jumper, but other boards use DIP switches.
 
 Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.html) for the one I used.
 
@@ -95,7 +95,7 @@ An alternative is to use a soldering iron to melt holes through the back of the 
 ## Send test data to the device
 The OpenEPaperLink firmware is designed to work with an [access point](https://openepaperlink.org/aps), but you can also send data to the display using Bluetooth Low Energy (BLE).
 
-If you want to quickly see what the display looks like with your own images, I found the **BLE Connectiom** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
+If you want to quickly see what the display looks like with your own images, I found the **BLE Connection** section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html to be the easiest.
 
 ![BLE Connection](pictures/BLEConnection.jpg)
 
@@ -106,13 +106,15 @@ As mentioned above, the OpenEPaperLink firmware is designed to work with an [acc
 
 So, always up for the challenge, I thought I'd roll my own. It is not an Access Point in the true sense that OpenEPaperLink uses the term, but rather a BLE-sender that mimics the web page used in the section above.
 
-After a bit of reverse engineering using some [BLE Debugging scripts](#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
+After a bit of reverse engineering using some [BLE Debugging scripts](protocol.md#ble-debugging) I was able to figure out the protocol, which I documented [here](protocol.md)
 
 Once that was done, I wrote a simple app to scan for the display's BLE advertisement, then connect to it and send some image data to it. For the image data I made a simple web call to to Australian Bureau of Meteorology web API to gather some weather data.
 
 You may need to tweak this for your country's weather service if you are outside Australia, but the principles remain the same and I'm sure that you can figure it out.
 
-I used a [Seeed Studio ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) for this project, but you can use any ESP32 with enough memory (I tried an ESP32-C3, but it does not have enough memory). Be aware that the code assumes that you have an external antenna connected, and this is selected in `connect_wifi()` in `weather.py`. If you want to use the internal antenna on this board, you will have to comment out the first few lines in `connect_wifi()`.
+I used a [Seeed Studio ESP32-C6](https://wiki.seeedstudio.com/xiao_esp32c6_getting_started/) for this project, but you can use any ESP32 with enough memory (I tried an ESP32-C3, but it does not have enough memory). 
+
+Be aware that the code assumes that you have an external antenna connected, and this is selected in `connect_wifi()` in `weather.py`. If you want to use the internal antenna with the Seeed Studio ESP32-C6 board, or if you are using a different ESP32 board, you will have to edit the first few lines in `connect_wifi()` in `weather.py`. Make sure to actually connect an external antenna if running the code unmodified.
 
 ![ESP32-C6](pictures/ESP32.jpg)
 
@@ -128,7 +130,7 @@ Flash the latest [MicroPython firmware](https://micropython.org/download/) to yo
 Before configuring, you need the Bluetooth MAC address of your ePaper display:
 
 If you didn't make note of the device's MAC address when you first flashed the firmware, you can use the **nRF Connect** app on your phone to scan for the display.
-1. Download [nRF Connect](https://www.nordicsemiconductor.com/products/nrf-connect-for-mobile/) for Android or iOS
+1. Download [nRF Connect](https://www.nordicsemi.com/Products/Development-tools/nRF-Connect-for-mobile) for Android or iOS
 2. Open the app and tap **"Scan"**
 3. Look for your device name (e.g. "ATC_xxxxxx" or similar)
 4. The address shown (format: `XX:XX:XX:XX:XX:XX`) is your target address
@@ -172,7 +174,7 @@ python -m mpremote connect COM10 run weather.py
 ```
 
 The ESP32 should connect to your WiFi network using the credentials stored in NVS, then scan for the MAC address of the display and connect to it once found.
-It then call the Australian Bureau of Meteorology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
+It then calls the Australian Bureau of Meteorology weather API to fetch weather data for the specified location, draws it all into an in-memory bitmap, and then sends the bitmap to the display over BLE.
 
 You should see the weather display on the screen:
 
@@ -242,71 +244,6 @@ The codebase is modular to allow reuse of the display protocol implementation in
 - **verify_nvs.py**: Validation script - run on PC
   - Reads the NVS parameters stored on the device
   - Allows verifying that all data is stored correctly
-
-## BLE Debugging
-
-This [monkey patch](https://en.wikipedia.org/wiki/Monkey_patch) script might be handy if you are doing your own protocol reverse engineering.
-
-You don't need to do this for this project, but this is what I used to see the BLE protocol used by the web app, so documenting it here for future reference.
-
-Put these commands in the browser debug console to trace BLE packets sent by a web app. 
-Then run your web app, and you will see exactly what it sends and receives. 
-
-```javascript
-// Log GATT connect
-const origConnect = BluetoothRemoteGATTServer.prototype.connect;
-BluetoothRemoteGATTServer.prototype.connect = async function () {
-  console.log("GATT CONNECT START");
-  const result = await origConnect.call(this);
-  console.log("GATT CONNECT SUCCESS");
-  return result;
-};
-
-// Log service discovery
-const origGetService = BluetoothRemoteGATTServer.prototype.getPrimaryService;
-BluetoothRemoteGATTServer.prototype.getPrimaryService = async function (uuid) {
-  console.log("GET SERVICE", uuid);
-  return origGetService.call(this, uuid);
-};
-
-// Log characteristic discovery
-const origGetChar = BluetoothRemoteGATTService.prototype.getCharacteristic;
-BluetoothRemoteGATTService.prototype.getCharacteristic = async function (uuid) {
-  console.log("GET CHARACTERISTIC", uuid);
-  return origGetChar.call(this, uuid);
-};
-
-// Log writes with response
-const origWrite = BluetoothRemoteGATTCharacteristic.prototype.writeValue;
-BluetoothRemoteGATTCharacteristic.prototype.writeValue = async function (value) {
-  const bytes = new Uint8Array(value.buffer || value);
-  console.log("BLE WRITE (response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  return origWrite.call(this, value);
-};
-
-// Log writes without response
-const origWriteNoResp = BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse;
-BluetoothRemoteGATTCharacteristic.prototype.writeValueWithoutResponse = async function (value) {
-  const bytes = new Uint8Array(value.buffer || value);
-  console.log("BLE WRITE (no response) UUID", this.uuid, "data", [...bytes].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  return origWriteNoResp.call(this, value);
-};
-
-// Log start notifications
-const origStart = BluetoothRemoteGATTCharacteristic.prototype.startNotifications;
-BluetoothRemoteGATTCharacteristic.prototype.startNotifications = async function () {
-  console.log("START NOTIFICATIONS UUID", this.uuid);
-  this.addEventListener("characteristicvaluechanged", (e) => {
-    const v = new Uint8Array(e.target.value.buffer);
-    console.log("NOTIFY UUID", this.uuid, "data", [...v].map(b=>b.toString(16).padStart(2,'0')).join(' '));
-  });
-  return origStart.call(this);
-};
-
-console.log("BLE logging patches installed ✓");
-```
-
-
 
 
 
