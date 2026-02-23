@@ -1,5 +1,4 @@
 """Weather display rendering module for ePaper."""
-import framebuf
 
 # Layout constants - all hardcoded positions in one place
 LAYOUT = {
@@ -153,7 +152,7 @@ class WeatherDisplay:
         try:
             self.draw_bmp_icon(self.fb_black, self.fb_yellow, cfg["rain_icon_x"], 
                               cfg["main_icon_y"], "raindrops", "_b")
-        except:
+        except Exception:
             pass  # Icon missing, skip
         
         # Rain value

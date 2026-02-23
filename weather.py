@@ -33,6 +33,7 @@ except ImportError as e:
 
 CONNECT_RETRIES = 200
 CONNECT_RETRY_DELAY_MS = 1200
+WIFI_CONNECT_RETRIES = 20
 BMP_PATH = "image.bmp"
 BMP_WIDTH = 480  # BMP is landscape
 BMP_HEIGHT = 176
@@ -66,7 +67,9 @@ DEFAULT_DST_ENABLED = True
 
 
 def urlencode_simple(value):
-    return value.replace(" ", "%20")
+    for ch, enc in [(" ", "%20"), ("&", "%26"), ("+", "%2B"), ("#", "%23")]:
+        value = value.replace(ch, enc)
+    return value
 
 
 def connect_wifi(ssid, password, timeout_s=30):
@@ -234,6 +237,11 @@ def resolve_bom_location(location_query=None, location_state=None):
     if BOM_LOCATION_GEOHASH:
         return BOM_LOCATION_GEOHASH, location_query
 
+    # Return cached geohash if available for this location
+    cache_key = "%s_%s" % (location_query.lower(), location_state.lower())
+    if cache_key in _GEOHASH_CACHE:
+        return _GEOHASH_CACHE[cache_key]
+
     search_url = "%s/locations?search=%s" % (BOM_API_BASE, urlencode_simple(location_query))
     payload = http_get_json(search_url)
     locations = payload.get("data") or []
@@ -254,60 +262,91 @@ def resolve_bom_location(location_query=None, location_state=None):
     if loc_state:
         loc_name = "%s, %s" % (loc_name, loc_state)
 
-    return preferred.get("geohash"), loc_name
+    geohash = preferred.get("geohash")
+    _GEOHASH_CACHE[cache_key] = (geohash, loc_name)
+    return geohash, loc_name
+
+
+def _get_tz_offset(t_utc=None):
+    """Get timezone offset in seconds, including DST if applicable.
+    
+    Uses Australian DST rules (1st Sunday Oct to 1st Sunday Apr).
+    
+    Args:
+        t_utc: UTC epoch time to evaluate DST for (default: current time)
+    
+    Returns:
+        Offset in seconds to add to UTC to get local time.
+    """
+    tz_offset = _TZ_CONFIG["tz_offset"]
+    if not _TZ_CONFIG["dst_enabled"]:
+        return tz_offset
+    
+    if t_utc is None:
+        t_utc = time.time()
+    year = time.localtime(t_utc)[0]
+    
+    def get_first_sunday(y, m):
+        t_start = time.mktime((y, m, 1, 0, 0, 0, 0, 0))
+        wday = time.localtime(t_start)[6]
+        days = (6 - wday + 7) % 7
+        return 1 + days
+    
+    apr_day = get_first_sunday(year, 4)
+    oct_day = get_first_sunday(year, 10)
+    
+    # DST End: 1st Sunday Apr @ 3:00 AM DST → convert to UTC
+    dst_end_utc = time.mktime((year, 4, apr_day, 3, 0, 0, 0, 0)) - (tz_offset + 3600)
+    # DST Start: 1st Sunday Oct @ 2:00 AM standard → convert to UTC
+    dst_start_utc = time.mktime((year, 10, oct_day, 2, 0, 0, 0, 0)) - tz_offset
+    
+    # DST active: Oct→Apr (Southern Hemisphere)
+    is_dst = (t_utc < dst_end_utc) or (t_utc >= dst_start_utc)
+    return tz_offset + (3600 if is_dst else 0)
+
+
+def _utc_date_to_local(date_iso):
+    """Convert a BOM UTC date/datetime string to local time tuple.
+    
+    Parses full ISO datetime (e.g., "2026-02-22T13:00:00Z") when available,
+    including DST-aware timezone offset.
+    
+    Returns:
+        time tuple (year, month, day, hour, min, sec, wday, yday) or None on error.
+    """
+    if not date_iso or len(date_iso) < 10:
+        return None
+    
+    year = int(date_iso[0:4])
+    month = int(date_iso[5:7])
+    day = int(date_iso[8:10])
+    
+    # Parse time component if present (e.g., "2026-02-22T13:00:00Z")
+    hour, minute, second = 0, 0, 0
+    if len(date_iso) >= 19 and date_iso[10] == 'T':
+        hour = int(date_iso[11:13])
+        minute = int(date_iso[14:16])
+        second = int(date_iso[17:19])
+    
+    try:
+        t_utc = time.mktime((year, month, day, hour, minute, second, 0, 0))
+        return time.localtime(t_utc + _get_tz_offset(t_utc))
+    except Exception:
+        return None
 
 
 def _weekday_name(date_iso):
-    if not date_iso or len(date_iso) < 10:
+    tm = _utc_date_to_local(date_iso)
+    if tm is None:
         return "---"
-    # BOM dates "2026-02-13T13:00:00Z" are UTC.
-    # For Australian East Coast, +10/11h pushes this into the NEXT day.
-    # We simply add 1 day to the date parsed from the string.
-    
-    year = int(date_iso[0:4])
-    month = int(date_iso[5:7])
-    day = int(date_iso[8:10])
-
-    # Simple approximate add-one-day (good enough for typical BOM usage)
-    # Proper calendar logic would be better but keeps it small.
-    # Let's use utime.mktime if we want to be safe, or just Zeller's with an offset?
-    # Actually, let's use standard epoch math if possible, or just hack the day.
-    
-    # Let's rely on standard python logic if possible, or zeller.
-    # Note: 31st + 1 -> 32nd. Zeller might handle it, but months need care.
-    # Safer to convert to epoch, add 86400, convert back.
-    
-    try:
-        t = time.mktime((year, month, day, 12, 0, 0, 0, 0))
-        t += 86400 # Add 24 hours
-        # localtime might not be timezone aware on ESP32 without config, 
-        # but relative change is what matters.
-        # However, mktime -> tuple is cleaner.
-        import time as tt
-        tm = tt.localtime(t)
-        # tm is (year, month, day, hour, min, sec, wday, yday)
-        # wday: 0=Mon, 6=Sun
-        names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        return names[tm[6]]
-    except:
-        return "---"
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    return names[tm[6]]
 
 def _date_str_local(date_iso):
-    if not date_iso or len(date_iso) < 10:
-        return "", 0, 0
-    
-    year = int(date_iso[0:4])
-    month = int(date_iso[5:7])
-    day = int(date_iso[8:10])
-    
-    try:
-        t = time.mktime((year, month, day, 12, 0, 0, 0, 0))
-        t += 86400
-        tm = time.localtime(t)
-        # Return (day_of_month, month_num)
-        return tm[2], tm[1]
-    except:
+    tm = _utc_date_to_local(date_iso)
+    if tm is None:
         return 0, 0
+    return tm[2], tm[1]
 
 def fetch_bom_daily_forecast(limit_days):
     geohash, location_name = resolve_bom_location()
@@ -408,7 +447,7 @@ def draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, size_suffix="_s"):
                 print("Unsupported BPP %d for icon: %s" % (bpp, filename))
                 return
 
-            palette = None
+            palette_data = None
             if bpp == 8:
                 # Read palette. 
                 # Assumes standard BITMAPINFOHEADER (40 bytes). 
@@ -505,12 +544,6 @@ def _draw_icon(fb_black, fb_yellow, x, y, icon_name, compact=False):
         # We have 100x100 space.
         draw_bmp_icon(fb_black, fb_yellow, x, y, icon_name, "_b")
 
-
-
-def _draw_wind_icon(fb_black, x, y):
-    fb_black.line(x - 14, y - 4, x + 12, y - 4, 1)
-    fb_black.line(x - 10, y + 1, x + 14, y + 1, 1)
-    fb_black.line(x - 14, y + 6, x + 10, y + 6, 1)
 
 
 def _draw_text_compat(fb, x, y, text, color, scale=2):
@@ -723,12 +756,8 @@ def bmp_to_raw_bw_color(path, bmp_width, bmp_height, display_width, display_heig
     return bytes(black_plane) + bytes(color_plane)
 
 
-async def run_update_cycle(wlan):
-    """Fetch weather, render display, and upload to BLE device.
-    
-    Args:
-        wlan: Connected WiFi network object (from connect_wifi)
-    """
+async def run_update_cycle():
+    """Fetch weather, render display, and upload to BLE device."""
     # Load target address from NVS, or override via command-line argument
     if len(sys.argv) > 1:
         target_addr = sys.argv[1].lower()
@@ -750,10 +779,6 @@ async def run_update_cycle(wlan):
         if not forecast:
             raise RuntimeError("Failed to fetch BOM forecast after 5 attempts")
 
-        print("--- DEBUG FORECAST DATA ---")
-        for i, d in enumerate(forecast.get("days", [])):
-             print("Day %d: %s %s Min:%s Max:%s" % (i, d.get("date_short"), d.get("weekday"), d.get("temp_min"), d.get("temp_max")))
-        print("---------------------------")
         image_data = render_weather_to_raw(BMP_WIDTH, BMP_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT, forecast)
         print("Rendered weather -> raw bytes:", len(image_data))
     else:
@@ -788,6 +813,9 @@ _LOCATION_CONFIG = {
     "state": BOM_LOCATION_STATE
 }
 
+# Geohash cache: {"location_state": (geohash, display_name)}
+_GEOHASH_CACHE = {}
+
 
 def set_timezone_config(tz_offset_seconds, dst_enabled):
     """Set global timezone configuration."""
@@ -806,42 +834,10 @@ def set_location_config(location_name, location_state):
 def get_local_time():
     """Returns (year, month, day, hour, minute, second, wday, yday) in local time.
     
-    Uses timezone offset and DST settings from configuration.
-    For Australian locations with DST: activates 1st Sunday Oct to 1st Sunday Apr.
-    For locations without DST: uses fixed offset year-round.
+    Uses timezone offset and DST settings from _get_tz_offset().
     """
     t_utc = time.time()
-    year = time.localtime(t_utc)[0]
-    
-    tz_offset = _TZ_CONFIG["tz_offset"]
-    dst_enabled = _TZ_CONFIG["dst_enabled"]
-    
-    if not dst_enabled:
-        # Simple fixed offset (no DST)
-        return time.localtime(t_utc + tz_offset)
-    
-    # Australian DST rules: 1st Sunday Oct @ 2am Standard -> 1st Sunday Apr @ 3am DST
-    def get_sunday(y, m):
-        t_start = time.mktime((y, m, 1, 0, 0, 0, 0, 0))
-        wday = time.localtime(t_start)[6]
-        days = (6 - wday + 7) % 7
-        return 1 + days
-
-    apr_day = get_sunday(year, 4)
-    oct_day = get_sunday(year, 10)
-    
-    # DST End: April apr_day 03:00 DST (UTC+11) -> UTC 16:00 previous day
-    dst_end_utc = time.mktime((year, 4, apr_day, 3, 0, 0, 0, 0)) - 39600  # 11h
-    
-    # DST Start: Oct oct_day 02:00 Standard (UTC+10) -> UTC 16:00 previous day
-    dst_start_utc = time.mktime((year, 10, oct_day, 2, 0, 0, 0, 0)) - 36000  # 10h
-    
-    # DST active: Oct->Apr (Southern Hemisphere)
-    is_dst = (t_utc < dst_end_utc) or (t_utc >= dst_start_utc)
-    
-    # Use DST offset (+1 hour) if active
-    offset = tz_offset + (3600 if is_dst else 0)
-    return time.localtime(t_utc + offset)
+    return time.localtime(t_utc + _get_tz_offset(t_utc))
 
 
 async def main():
@@ -852,26 +848,32 @@ async def main():
     set_location_config(location_name, location_state)
     set_timezone_config(tz_offset_sec, dst_enabled)
     
+    # Cache Wi-Fi credentials once at startup
+    wifi_ssid = None
+    wifi_password = None
+    if USE_WEATHER_SOURCE:
+        wifi_ssid, wifi_password = load_wifi_credentials()
+        print("Wi-Fi SSID:", wifi_ssid)
+    
     while True:
+        wlan = None
         try:
             # 1. Connect Wi-Fi once per cycle
-            wlan = None
             if USE_WEATHER_SOURCE:
-                wifi_ssid, wifi_password = load_wifi_credentials()
-                print("Wi-Fi SSID:", wifi_ssid)
-                
                 wifi_success = False
-                for i in range(1, CONNECT_RETRIES + 1):
+                for i in range(1, WIFI_CONNECT_RETRIES + 1):
                     try:
                         wlan = connect_wifi(wifi_ssid, wifi_password, timeout_s=10)
                         wifi_success = True
                         break
                     except Exception as e:
-                        print("Wi-Fi connect attempt %d/%d failed: %s" % (i, CONNECT_RETRIES, e))
+                        print("Wi-Fi connect attempt %d/%d failed: %s" % (i, WIFI_CONNECT_RETRIES, e))
                         time.sleep(1)
                 
                 if not wifi_success:
-                    raise RuntimeError("Wi-Fi connection failed after %d attempts" % CONNECT_RETRIES)
+                    print("Wi-Fi connection failed after %d attempts. Rebooting..." % WIFI_CONNECT_RETRIES)
+                    time.sleep(5)
+                    machine.reset()
                 
                 # 2. Sync NTP time
                 if ntptime:
@@ -892,7 +894,7 @@ async def main():
             success = False
             for attempt in range(3):
                 try:
-                    await run_update_cycle(wlan)
+                    await run_update_cycle()
                     success = True
                     break
                 except Exception as e:
@@ -907,7 +909,6 @@ async def main():
             tm = get_local_time() # Refresh time after update
             h, m = tm[3], tm[4]
             current_minutes = h * 60 + m
-            current_seconds_in_day = current_minutes * 60 + tm[5]
             
             slots = [(5, 30), (13, 0)]
             slot_minutes = [sh * 60 + sm for sh, sm in slots]
@@ -941,6 +942,14 @@ async def main():
             print("Error in main loop:", e)
             print("Retrying in 60 seconds...")
             await asyncio.sleep(60)
+        finally:
+            # Disconnect Wi-Fi to save power during sleep
+            if wlan:
+                try:
+                    wlan.active(False)
+                    print("Wi-Fi disabled for sleep.")
+                except Exception:
+                    pass
 
 try:
     asyncio.run(main())

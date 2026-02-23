@@ -1,6 +1,7 @@
 """Configure ESP32 device with Wi-Fi credentials, location, and timezone settings via mpremote."""
 
 import argparse
+import re
 import struct
 import subprocess
 import sys
@@ -134,6 +135,9 @@ def main():
     if args.location and args.state and args.tz_offset is not None:
         location_name = args.location
         location_state = args.state.upper()
+        if location_state not in AUSTRALIAN_TIMEZONES:
+            print("Warning: '%s' is not a recognised Australian state/territory code." % location_state)
+            print("Valid codes: %s" % ", ".join(sorted(AUSTRALIAN_TIMEZONES.keys())))
         tz_offset_seconds = int(args.tz_offset * 3600)
         dst_enabled = not args.no_dst
     else:
@@ -145,9 +149,9 @@ def main():
     else:
         while True:
             target_addr = input("BLE target device address (e.g., 3c:60:55:84:a0:42): ").strip()
-            if target_addr:
+            if target_addr and re.match(r'^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$', target_addr):
                 break
-            print("Target address is required, please try again.")
+            print("Invalid MAC address format. Expected format: xx:xx:xx:xx:xx:xx")
     
     # Build configuration
     config = {

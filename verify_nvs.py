@@ -20,6 +20,22 @@ nvs = esp32.NVS('weather')
 print('Checking NVS namespace: weather')
 try:
     buf = bytearray(96)
+    nvs.get_blob('wifi_ssid', buf)
+    ssid = bytes(buf).split(b'\\x00', 1)[0].decode()
+    print('wifi_ssid:', repr(ssid))
+except OSError as e:
+    print('wifi_ssid: NOT FOUND -', e)
+
+try:
+    buf = bytearray(96)
+    nvs.get_blob('wifi_pass', buf)
+    pw = bytes(buf).split(b'\\x00', 1)[0].decode()
+    print('wifi_pass:', repr('*' * len(pw)) if pw else 'EMPTY')
+except OSError as e:
+    print('wifi_pass: NOT FOUND -', e)
+
+try:
+    buf = bytearray(96)
     nvs.get_blob('loc_name', buf)
     name = bytes(buf).split(b'\\x00', 1)[0].decode()
     print('loc_name:', repr(name))

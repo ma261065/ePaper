@@ -2,7 +2,6 @@
 
 import asyncio
 import binascii
-import math
 import struct
 
 import aioble
@@ -152,9 +151,9 @@ class BLEDisplay:
         packet = cmd_packet(cmd_id, payload)
         await ch.write(packet, response=False)
     
-    async def _send_part_wait_ack(self, ch, block_part_payload):
+    async def _send_part_wait_ack(self, ch, block_part_payload, max_retries=5):
         """Send a block part and wait for acknowledgment."""
-        while True:
+        for _retry in range(max_retries):
             await self._send_cmd(ch, CMD_SEND_BLOCK_PART, block_part_payload)
             while True:
                 raw = await self._wait_notification(ch, timeout_s=10)
@@ -170,6 +169,7 @@ class BLEDisplay:
                 if rsp_cmd == RSP_ERROR:
                     raise RuntimeError("Device returned protocol error (0xFFFF)")
                 print("Ignoring part-wait notification 0x%04X" % (rsp_cmd if rsp_cmd is not None else -1))
+        raise RuntimeError("Block part failed after %d retries" % max_retries)
     
     async def _wait_ready_ack(self, ch):
         """Wait for ready acknowledgment from device."""
@@ -198,7 +198,7 @@ class BLEDisplay:
         target_addr = self.target_addr
         
         # Render image
-        total_blocks = int(math.ceil(len(image_data) / BLOCK_DATA_SIZE))
+        total_blocks = (len(image_data) + BLOCK_DATA_SIZE - 1) // BLOCK_DATA_SIZE
 
         avail = make_avail_data_info(image_data, data_type)
         
@@ -221,6 +221,7 @@ class BLEDisplay:
                 conn = await device.connect(timeout_ms=10000)
                 break
             except Exception as exc:
+                last_error = exc
                 if attempt < self.connect_retries:
                     await asyncio.sleep_ms(self.connect_retry_delay_ms)
                     device = None
