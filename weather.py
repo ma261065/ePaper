@@ -1,3 +1,4 @@
+import gc
 import struct
 import sys
 import time
@@ -202,15 +203,18 @@ def load_location_config():
 def http_get_json(url, retries=3, delay=2):
     last_exc = None
     for attempt in range(retries):
+        gc.collect()
         try:
             response = urequests.get(url)
             try:
-                return response.json()
+                data = response.json()
             finally:
                 response.close()
+            return data
         except OSError as e:
             print("HTTP GET failed (Attempt %d/%d): %s" % (attempt + 1, retries, e))
             last_exc = e
+            gc.collect()
             if attempt < retries - 1:
                 time.sleep(delay)
     
@@ -607,6 +611,7 @@ def _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, d
 
 def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, forecast):
     """Render live weather in landscape layout, then transpose to portrait display format."""
+    gc.collect()
     plane_size_land = (bmp_width * bmp_height) // 8
     land_black = bytearray([0xFF] * plane_size_land)
     land_color = bytearray([0x00] * plane_size_land)
@@ -623,12 +628,17 @@ def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, 
         display = WeatherDisplay(fb_black, fb_yellow, _draw_text_compat, _draw_icon,
                                 draw_bmp_icon, _month_name, bmp_width, bmp_height)
         display.render(forecast)
+        del display
     else:
         # Fallback for minimal rendering
         if not forecast.get("days"):
             _draw_text_compat(fb_black, 12, 12, "No forecast", 0)
 
-    return _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height)
+    del fb_black, fb_yellow
+    result = _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height)
+    del land_black, land_color
+    gc.collect()
+    return result
 
 
 def read_bmp_info(path, expected_width, expected_height):
@@ -792,6 +802,7 @@ async def run_update_cycle():
     # Fetch and render weather image
     if USE_WEATHER_SOURCE:
         print("Fetching BOM daily forecast...")
+        gc.collect()
         forecast = None
         for i in range(5):
             try:
@@ -799,12 +810,15 @@ async def run_update_cycle():
                 break
             except Exception as e:
                 print("Fetch BOM attempt %d failed: %s" % (i+1, e))
+                gc.collect()
                 time.sleep(2)
         
         if not forecast:
             raise RuntimeError("Failed to fetch BOM forecast after 5 attempts")
 
         image_data = render_weather_to_raw(BMP_WIDTH, BMP_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT, forecast)
+        del forecast
+        gc.collect()
         print("Rendered weather -> raw bytes:", len(image_data))
     else:
         image_data = bmp_to_raw_bw_color(BMP_PATH, BMP_WIDTH, BMP_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT)
@@ -881,6 +895,8 @@ async def main():
         print("Wi-Fi SSID:", wifi_ssid)
     
     while True:
+        gc.collect()
+        print("Free memory: %d bytes" % gc.mem_free())
         wlan = None
         try:
             # 1. Connect Wi-Fi once per cycle
@@ -975,6 +991,7 @@ async def main():
                     print("Wi-Fi disabled for sleep.")
                 except Exception:
                     pass
+            gc.collect()
 
 try:
     asyncio.run(main())
