@@ -584,8 +584,11 @@ def _draw_text_compat(fb, x, y, text, color, scale=2):
 
 def _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, display_width, display_height):
     plane_size = (display_width * display_height) // 8
-    out_black = bytearray([0xFF] * plane_size)
-    out_color = bytearray([0x00] * plane_size)
+    # Single output buffer: black plane then color plane (avoids extra copy from concatenation)
+    out = bytearray(plane_size * 2)
+    # Initialize black plane to 0xFF, color plane stays 0x00
+    for i in range(plane_size):
+        out[i] = 0xFF
 
     fb_land_black = framebuf.FrameBuffer(land_black, bmp_width, bmp_height, framebuf.MONO_HMSB)
     fb_land_color = framebuf.FrameBuffer(land_color, bmp_width, bmp_height, framebuf.MONO_HMSB)
@@ -602,11 +605,11 @@ def _transpose_landscape_planes(land_black, land_color, bmp_width, bmp_height, d
             bit_in_byte = 7 - (bit_index % 8)
 
             if is_yellow:
-                out_color[byte_pos] |= (1 << bit_in_byte)
+                out[plane_size + byte_pos] |= (1 << bit_in_byte)
             elif is_black:
-                out_black[byte_pos] &= ~(1 << bit_in_byte)
+                out[byte_pos] &= ~(1 << bit_in_byte)
 
-    return bytes(out_black) + bytes(out_color)
+    return out
 
 
 def render_weather_to_raw(bmp_width, bmp_height, display_width, display_height, forecast):
@@ -791,7 +794,7 @@ def bmp_to_raw_bw_color(path, bmp_width, bmp_height, display_width, display_heig
     return bytes(black_plane) + bytes(color_plane)
 
 
-async def run_update_cycle():
+async def run_update_cycle(wlan=None):
     """Fetch weather, render display, and upload to BLE device."""
     # Load target address from NVS, or override via command-line argument
     if len(sys.argv) > 1:
@@ -803,6 +806,7 @@ async def run_update_cycle():
     if USE_WEATHER_SOURCE:
         print("Fetching BOM daily forecast...")
         gc.collect()
+        print("Free memory before HTTP: %d bytes" % gc.mem_free())
         forecast = None
         for i in range(5):
             try:
@@ -816,6 +820,16 @@ async def run_update_cycle():
         if not forecast:
             raise RuntimeError("Failed to fetch BOM forecast after 5 attempts")
 
+        # Disconnect WiFi before rendering to free SSL/socket buffers
+        if wlan:
+            try:
+                wlan.disconnect()
+                wlan.active(False)
+            except Exception:
+                pass
+            gc.collect()
+            print("Free memory after WiFi off: %d bytes" % gc.mem_free())
+
         image_data = render_weather_to_raw(BMP_WIDTH, BMP_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT, forecast)
         del forecast
         gc.collect()
@@ -825,6 +839,8 @@ async def run_update_cycle():
         print("Loaded BMP:", BMP_PATH, "-> raw bytes:", len(image_data))
 
     # Upload to BLE display
+    gc.collect()
+    print("Free memory before BLE: %d bytes" % gc.mem_free())
     if BLEDisplay:
         try:
             display = BLEDisplay(target_addr, 
@@ -882,6 +898,9 @@ def get_local_time():
 async def main():
     print("Device starting main loop...")
     
+    # Trigger GC more frequently to prevent fragmentation
+    gc.threshold(gc.mem_free() // 4 + gc.mem_alloc() // 4)
+    
     # Load configuration from NVS
     location_name, location_state, tz_offset_sec, dst_enabled = load_location_config()
     set_location_config(location_name, location_state)
@@ -895,8 +914,20 @@ async def main():
         print("Wi-Fi SSID:", wifi_ssid)
     
     while True:
+        # Force-clean any stale WiFi/SSL state from previous cycle
+        try:
+            _wlan = network.WLAN(network.STA_IF)
+            _wlan.disconnect()
+            _wlan.active(False)
+        except Exception:
+            pass
         gc.collect()
-        print("Free memory: %d bytes" % gc.mem_free())
+        free = gc.mem_free()
+        print("Free memory: %d bytes" % free)
+        if free < 100000:
+            print("Memory critically low (%d bytes). Rebooting to reclaim..." % free)
+            time.sleep(2)
+            machine.reset()
         wlan = None
         try:
             # 1. Connect Wi-Fi once per cycle
@@ -935,11 +966,13 @@ async def main():
             success = False
             for attempt in range(3):
                 try:
-                    await run_update_cycle()
+                    await run_update_cycle(wlan)
+                    wlan = None  # run_update_cycle disconnects WiFi
                     success = True
                     break
                 except Exception as e:
                     print("Update cycle failed (attempt %d/3): %s" % (attempt + 1, e))
+                    gc.collect()
                     await asyncio.sleep(10)
             
             if not success:
