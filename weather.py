@@ -54,7 +54,7 @@ NVS_KEY_DST_ENABLED = "dst_enabled"
 NVS_KEY_TARGET_ADDR = "target_addr"
 WIFI_SWITCH_ENABLE_PIN = 3
 WIFI_ANT_CONFIG_PIN = 14
-BOM_API_BASE = "https://api.weather.bom.gov.au/v1"
+BOM_API_BASE = "http://api.weather.bom.gov.au/v1"
 BOM_LOCATION_QUERY = "Williamstown"  # Default, will be overridden by NVS
 BOM_LOCATION_STATE = "VIC"  # Default, will be overridden by NVS
 BOM_LOCATION_GEOHASH = ""
@@ -214,6 +214,9 @@ def http_get_json(url, retries=3, delay=2):
         except OSError as e:
             print("HTTP GET failed (Attempt %d/%d): %s" % (attempt + 1, retries, e))
             last_exc = e
+            # ENOMEM (errno 12) means heap is fragmented; retrying won't help
+            if e.args and e.args[0] == 12:
+                break
             gc.collect()
             if attempt < retries - 1:
                 time.sleep(delay)
@@ -808,16 +811,25 @@ async def run_update_cycle(wlan=None):
         gc.collect()
         print("Free memory before HTTP: %d bytes" % gc.mem_free())
         forecast = None
+        last_err = None
         for i in range(5):
             try:
                 forecast = fetch_bom_daily_forecast(FORECAST_DAYS)
                 break
             except Exception as e:
+                last_err = e
                 print("Fetch BOM attempt %d failed: %s" % (i+1, e))
+                # ENOMEM = heap fragmented, further retries are useless
+                if isinstance(e, OSError) and e.args and e.args[0] == 12:
+                    break
                 gc.collect()
                 time.sleep(2)
         
         if not forecast:
+            if isinstance(last_err, OSError) and last_err.args and last_err.args[0] == 12:
+                print("Heap fragmented (ENOMEM). Rebooting to reclaim memory...")
+                time.sleep(2)
+                machine.reset()
             raise RuntimeError("Failed to fetch BOM forecast after 5 attempts")
 
         # Disconnect WiFi before rendering to free SSL/socket buffers
@@ -895,26 +907,50 @@ def get_local_time():
     return time.localtime(t_utc + _get_tz_offset(t_utc))
 
 
+def _calc_sleep_seconds():
+    """Calculate seconds until next scheduled slot (05:30 or 13:00 local)."""
+    tm = get_local_time()
+    h, m = tm[3], tm[4]
+    current_minutes = h * 60 + m
+
+    slots = [(5, 30), (13, 0)]
+    slot_minutes = sorted(sh * 60 + sm for sh, sm in slots)
+
+    next_slot_mins = None
+    for slot in slot_minutes:
+        if slot > current_minutes:
+            next_slot_mins = slot
+            break
+
+    if next_slot_mins is None:
+        next_slot_mins = slot_minutes[0] + 1440  # Tomorrow's first slot
+
+    sleep_seconds = (next_slot_mins - current_minutes) * 60 - tm[5]
+    if sleep_seconds < 60:
+        sleep_seconds = 60
+    return sleep_seconds
+
+
 async def main():
     print("Device starting main loop...")
-    
+
     # Trigger GC more frequently to prevent fragmentation
     gc.threshold(gc.mem_free() // 4 + gc.mem_alloc() // 4)
-    
+
     # Load configuration from NVS
     location_name, location_state, tz_offset_sec, dst_enabled = load_location_config()
     set_location_config(location_name, location_state)
     set_timezone_config(tz_offset_sec, dst_enabled)
-    
+
     # Cache Wi-Fi credentials once at startup
     wifi_ssid = None
     wifi_password = None
     if USE_WEATHER_SOURCE:
         wifi_ssid, wifi_password = load_wifi_credentials()
         print("Wi-Fi SSID:", wifi_ssid)
-    
+
     while True:
-        # Force-clean any stale WiFi/SSL state from previous cycle
+        # Force-clean any stale WiFi state from previous cycle
         try:
             _wlan = network.WLAN(network.STA_IF)
             _wlan.disconnect()
@@ -941,12 +977,12 @@ async def main():
                     except Exception as e:
                         print("Wi-Fi connect attempt %d/%d failed: %s" % (i, WIFI_CONNECT_RETRIES, e))
                         time.sleep(1)
-                
+
                 if not wifi_success:
                     print("Wi-Fi connection failed after %d attempts. Rebooting..." % WIFI_CONNECT_RETRIES)
                     time.sleep(5)
                     machine.reset()
-                
+
                 # 2. Sync NTP time
                 if ntptime:
                     print("Syncing NTP...")
@@ -956,12 +992,12 @@ async def main():
                         print("Time synced (local): %04d-%02d-%02d %02d:%02d:%02d" % (t_mel[0], t_mel[1], t_mel[2], t_mel[3], t_mel[4], t_mel[5]))
                     except Exception as e:
                         print("NTP sync failed:", e)
-            
+
             # 3. Run scheduled update
             tm = get_local_time()
             hour = tm[3]
             minute = tm[4]
-            
+
             print("Running scheduled update cycle at %02d:%02d..." % (hour, minute))
             success = False
             for attempt in range(3):
@@ -974,44 +1010,22 @@ async def main():
                     print("Update cycle failed (attempt %d/3): %s" % (attempt + 1, e))
                     gc.collect()
                     await asyncio.sleep(10)
-            
+
             if not success:
                 print("Update cycle failed after 3 attempts. Skipping to next scheduled slot.")
-            
+
             # 4. Calculate sleep until next slot
-            # Slots: 05:30, 13:00 (Local Time)
-            tm = get_local_time() # Refresh time after update
-            h, m = tm[3], tm[4]
-            current_minutes = h * 60 + m
-            
-            slots = [(5, 30), (13, 0)]
-            slot_minutes = [sh * 60 + sm for sh, sm in slots]
-            slot_minutes.sort()
-            
-            next_slot_mins = None
-            for slot in slot_minutes:
-                if slot > current_minutes:
-                    next_slot_mins = slot
-                    break
-            
-            if next_slot_mins is None:
-                # Tomorrow's first slot
-                next_slot_mins = slot_minutes[0] + 1440 # Add 24 hours
-                
-            sleep_minutes = next_slot_mins - current_minutes
-            sleep_seconds = sleep_minutes * 60 - tm[5]
-            
-            if sleep_seconds < 0: sleep_seconds = 0
-            
+            sleep_seconds = _calc_sleep_seconds()
+
             print("Sleeping for %d seconds (%d min) until next update..." % (sleep_seconds, sleep_seconds // 60))
-            
+
             # Sleep Loop
             remaining = sleep_seconds
             while remaining > 0:
                 chunk = 60 if remaining > 60 else remaining
                 await asyncio.sleep(chunk)
                 remaining -= chunk
-                
+
         except Exception as e:
             print("Error in main loop:", e)
             print("Retrying in 60 seconds...")
