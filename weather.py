@@ -8,7 +8,8 @@ import esp32
 import framebuf
 import machine
 import network
-import urequests
+import socket
+import ujson
 try:
     import ntptime
 except ImportError:
@@ -63,8 +64,9 @@ FORECAST_DAYS = 8
 DEFAULT_TZ_OFFSET_SECONDS = 36000  # UTC+10 (10 hours in seconds)
 DEFAULT_DST_ENABLED = True
 
-
-
+# Pre-allocate HTTP response buffer once at startup (heap is clean).
+# Reused every cycle — never freed — so it can't cause fragmentation.
+_HTTP_BUF = bytearray(24576)  # 24 KB, plenty for BOM API responses
 
 
 def urlencode_simple(value):
@@ -205,12 +207,44 @@ def http_get_json(url, retries=3, delay=2):
     for attempt in range(retries):
         gc.collect()
         try:
-            response = urequests.get(url)
+            # Parse "http://host/path"
+            host_start = url.index('//') + 2
+            path_start = url.index('/', host_start)
+            host = url[host_start:path_start]
+            path = url[path_start:]
+
+            s = socket.socket()
+            s.settimeout(15)
             try:
-                data = response.json()
+                addr = socket.getaddrinfo(host, 80, 0, socket.SOCK_STREAM)[0][-1]
+                s.connect(addr)
+
+                # Send request in small pieces (no string concat allocation)
+                s.send(b'GET ')
+                s.send(path.encode())
+                s.send(b' HTTP/1.0\r\nHost: ')
+                s.send(host.encode())
+                s.send(b'\r\n\r\n')
+
+                # Skip response headers
+                while True:
+                    line = s.readline()
+                    if not line or line == b'\r\n':
+                        break
+
+                # Read body into pre-allocated buffer (no large heap allocation)
+                mv = memoryview(_HTTP_BUF)
+                total = 0
+                while total < len(_HTTP_BUF):
+                    n = s.readinto(mv[total:])
+                    if not n:
+                        break
+                    total += n
             finally:
-                response.close()
-            return data
+                s.close()
+
+            return ujson.loads(mv[:total])
+
         except OSError as e:
             print("HTTP GET failed (Attempt %d/%d): %s" % (attempt + 1, retries, e))
             last_exc = e
@@ -220,7 +254,7 @@ def http_get_json(url, retries=3, delay=2):
             gc.collect()
             if attempt < retries - 1:
                 time.sleep(delay)
-    
+
     if last_exc:
         raise last_exc
     return {}
