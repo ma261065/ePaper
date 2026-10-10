@@ -58,7 +58,7 @@ Here is an AliExpress [link](https://www.aliexpress.com/item/1005004399796277.ht
 
 The next step takes some tricky dexterity, as you have to hold three wires against the three flashing pads. You may want to solder them if you can't hold them steady for the 20 seconds or so that it takes to flash the firmware.
 
-To flash the OpenEPaperLink firmware onto the display use the UART Flasher section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html.
+To flash the OpenEPaperLink firmware onto the display use the UART Flasher section of https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html. (You may have to hit **Advanced View** to see it)
 
 ![Serial Flasher](pictures/SerialFlasher.jpg)
 
